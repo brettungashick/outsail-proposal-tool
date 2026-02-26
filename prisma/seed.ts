@@ -7,17 +7,17 @@ async function main() {
   const passwordHash = await bcrypt.hash('outsail2024', 12);
 
   await prisma.user.upsert({
-    where: { email: 'advisor@outsail.com' },
+    where: { email: 'brett@outsail.co' },
     update: {},
     create: {
-      email: 'advisor@outsail.com',
+      email: 'brett@outsail.co',
       passwordHash,
-      name: 'OutSail Advisor',
+      name: 'Brett Ungashick',
       role: 'advisor',
     },
   });
 
-  console.log('Seed complete: advisor@outsail.com / outsail2024');
+  console.log('Seed complete: brett@outsail.co / outsail2024');
 }
 
 main()
