@@ -1,0 +1,83 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("advisor")
+  createdAt    DateTime @default(now())
+  projects     Project[]
+}
+
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  clientName  String
+  clientEmail String?
+  status      String      @default("draft")
+  advisorId   String
+  advisor     User        @relation(fields: [advisorId], references: [id])
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  documents   Document[]
+  analyses    Analysis[]
+  shareLinks  ShareLink[]
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vendorName String
+  fileName   String
+  filePath   String
+  fileType   String
+  rawText    String?
+  parsedData String?
+  uploadedAt DateTime @default(now())
+}
+
+model Analysis {
+  id                   String         @id @default(cuid())
+  projectId            String
+  project              Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version              Int            @default(1)
+  comparisonData       String
+  standardizationNotes String?
+  vendorNotes          String?
+  nextSteps            String?
+  citations            String?
+  createdBy            String
+  createdAt            DateTime       @default(now())
+  edits                AnalysisEdit[]
+}
+
+model AnalysisEdit {
+  id         String   @id @default(cuid())
+  analysisId String
+  analysis   Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  fieldPath  String
+  oldValue   String
+  newValue   String
+  editedBy   String
+  editedAt   DateTime @default(now())
+}
+
+model ShareLink {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  email     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
