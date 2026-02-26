@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { parseProposal, generateComparison } from '@/lib/claude';
+import { parseProposal, generateComparison, isApiKeyConfigured } from '@/lib/claude';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -28,6 +28,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: 'At least 2 vendor documents are required for comparison' },
       { status: 400 }
+    );
+  }
+
+  if (!isApiKeyConfigured()) {
+    return NextResponse.json(
+      { error: 'Anthropic API key is not configured. Please add ANTHROPIC_API_KEY to your environment variables.' },
+      { status: 503 }
     );
   }
 
@@ -95,15 +102,33 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(analysis, { status: 201 });
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Analysis generation error:', error);
     await prisma.project.update({
       where: { id: projectId },
       data: { status: 'draft' },
     });
-    return NextResponse.json(
-      { error: 'Failed to generate analysis. Please check your API key and try again.' },
-      { status: 500 }
-    );
+
+    let message = 'An unexpected error occurred during analysis.';
+    let status = 500;
+
+    if (error instanceof Error && 'status' in error) {
+      const apiError = error as Error & { status: number };
+      if (apiError.status === 401) {
+        message = 'Invalid Anthropic API key. Please check your configuration.';
+        status = 401;
+      } else if (apiError.status === 429) {
+        message = 'Rate limit exceeded. Please wait a moment and try again.';
+        status = 429;
+      } else {
+        message = `Anthropic API error (${apiError.status}): ${apiError.message}`;
+      }
+    } else if (error instanceof SyntaxError) {
+      message = 'Failed to parse the AI response. Please try again.';
+    } else if (error instanceof Error) {
+      message = `Analysis failed: ${error.message}`;
+    }
+
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -5,6 +5,11 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
+export function isApiKeyConfigured(): boolean {
+  const key = process.env.ANTHROPIC_API_KEY;
+  return !!key && key !== 'your-anthropic-api-key-here';
+}
+
 export async function parseProposal(
   rawText: string,
   vendorName: string,
