@@ -10,9 +10,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   }
 
   const userId = (session.user as { id: string }).id;
+  const userRole = (session.user as { role?: string }).role;
+
+  // Allow any authenticated advisor to read any project (team access)
   const project = await prisma.project.findFirst({
-    where: { id: params.id, advisorId: userId },
+    where: { id: params.id },
     include: {
+      advisor: { select: { id: true, name: true, email: true } },
       documents: { orderBy: { uploadedAt: 'desc' } },
       analyses: { orderBy: { version: 'desc' }, take: 1 },
       shareLinks: { orderBy: { createdAt: 'desc' } },
@@ -23,7 +27,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  return NextResponse.json(project);
+  // Include ownership info for the client
+  const isOwner = project.advisorId === userId;
+  const isAdmin = userRole === 'admin';
+
+  return NextResponse.json({ ...project, isOwner, isAdmin });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {

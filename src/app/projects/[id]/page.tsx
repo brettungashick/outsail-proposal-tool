@@ -15,6 +15,9 @@ interface Document {
   fileType: string;
   uploadedAt: string;
   parsedData: string | null;
+  documentType?: string;
+  quoteVersion?: number;
+  isActive?: boolean;
 }
 
 interface Analysis {
@@ -40,6 +43,9 @@ interface Project {
   documents: Document[];
   analyses: Analysis[];
   shareLinks: ShareLink[];
+  isOwner?: boolean;
+  isAdmin?: boolean;
+  advisor?: { id: string; name: string; email: string };
 }
 
 export default function ProjectPage() {
@@ -73,6 +79,15 @@ export default function ProjectPage() {
 
   const handleDeleteDocument = async (docId: string) => {
     await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
+    fetchProject();
+  };
+
+  const handleToggleActive = async (docId: string, isActive: boolean) => {
+    await fetch(`/api/documents/${docId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive }),
+    });
     fetchProject();
   };
 
@@ -119,6 +134,7 @@ export default function ProjectPage() {
   }
 
   const latestAnalysis = project.analyses[0] || null;
+  const canEdit = project.isOwner || project.isAdmin;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -134,11 +150,21 @@ export default function ProjectPage() {
           </button>
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">{project.name}</h1>
-              <p className="text-sm text-slate-500">Client: {project.clientName}</p>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-slate-900">{project.name}</h1>
+                {!canEdit && (
+                  <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-full">View Only</span>
+                )}
+              </div>
+              <p className="text-sm text-slate-500">
+                Client: {project.clientName}
+                {project.advisor && !project.isOwner && (
+                  <span className="ml-2 text-slate-400">· Advisor: {project.advisor.name}</span>
+                )}
+              </p>
             </div>
             <div className="flex gap-3">
-              {project.documents.length >= 2 && (
+              {canEdit && project.documents.length >= 2 && (
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
@@ -191,19 +217,23 @@ export default function ProjectPage() {
 
         {/* Tab Content */}
         {activeTab === 'documents' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <div className="bg-white rounded-xl border border-slate-200 p-6">
-                <h2 className="font-semibold text-slate-900 mb-4">Upload Proposal</h2>
-                <FileUpload projectId={projectId} onUploadComplete={fetchProject} />
+          <div className={`grid grid-cols-1 ${canEdit ? 'lg:grid-cols-3' : ''} gap-6`}>
+            {canEdit && (
+              <div className="lg:col-span-1">
+                <div className="bg-white rounded-xl border border-slate-200 p-6">
+                  <h2 className="font-semibold text-slate-900 mb-4">Upload Proposal</h2>
+                  <FileUpload projectId={projectId} onUploadComplete={fetchProject} />
+                </div>
               </div>
-            </div>
-            <div className="lg:col-span-2">
+            )}
+            <div className={canEdit ? 'lg:col-span-2' : ''}>
               <div className="bg-white rounded-xl border border-slate-200 p-6">
                 <h2 className="font-semibold text-slate-900 mb-4">Uploaded Documents</h2>
                 <DocumentList
                   documents={project.documents}
                   onDelete={handleDeleteDocument}
+                  onToggleActive={handleToggleActive}
+                  readOnly={!canEdit}
                 />
               </div>
             </div>

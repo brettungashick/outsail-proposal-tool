@@ -25,6 +25,7 @@ CRITICAL RULES:
 - Extract exact dollar amounts as numbers.
 - Note whether fees are monthly, annual, per-employee-per-month (PEPM), per-employee-per-year (PEPY), or flat fee.
 - Pay close attention to what modules/services are included vs. what might be add-ons.
+- Extract ALL discounts as structured objects with amounts. Look for: volume discounts, first-year discounts, multi-year discounts, waived fees, promotional pricing, percentage discounts, flat dollar discounts.
 
 DOCUMENT TEXT:
 ---
@@ -74,7 +75,17 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
       "rangeMax": <number or null>
     }
   ],
-  "discounts": ["<discount description>"],
+  "discounts": [
+    {
+      "id": "<unique-id like discount_1>",
+      "name": "<discount name, e.g. 'First Year Discount', 'Volume Discount'>",
+      "amount": <annual dollar amount of the discount as a positive number, or null if unclear>,
+      "type": "<percentage|flat|unknown>",
+      "percentageValue": <percentage as a number, e.g. 10 for 10%, or null>,
+      "rawText": "<exact relevant text from document>",
+      "appliesToYear": <null for all years, 1 for first year only, etc.>
+    }
+  ],
   "notableTerms": ["<notable term or condition>"],
   "unknowns": ["<anything unclear or potentially missing>"]
 }`;
@@ -121,6 +132,7 @@ CRITICAL RULES:
 - When a price range was given (isRange: true), use the MIDPOINT of rangeMin and rangeMax. Note this in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
+- Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
 
 PARSED PROPOSALS:
 ${JSON.stringify(parsedProposals, null, 2)}
@@ -164,11 +176,32 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
         "rows": [<similar structure>]
       },
       {
+        "name": "Discounts",
+        "rows": [
+          {
+            "id": "discount_<vendor>_<index>",
+            "label": "<discount name>",
+            "isDiscount": true,
+            "values": [
+              {
+                "amount": <negative number representing the discount, or null if vendor has no such discount>,
+                "display": "<formatted negative $ amount like '-$1,200/yr' or 'N/A'>",
+                "note": "<e.g. '10% first-year discount' or null>",
+                "citation": <citation object or null>,
+                "isConfirmed": <boolean>
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "Totals",
         "rows": [
-          {"id": "year1", "label": "Year 1 Total (Recurring + Implementation)", "values": [...], "isSubtotal": true},
-          {"id": "year2", "label": "Year 2 Total (Recurring Only)", "values": [...], "isSubtotal": true},
-          {"id": "year3", "label": "Year 3 Total (Recurring Only)", "values": [...], "isSubtotal": true},
+          {"id": "year1_before_discounts", "label": "Year 1 (Before Discounts)", "values": [...], "isSubtotal": true},
+          {"id": "year1_discounts", "label": "Year 1 Discounts", "values": [...], "isDiscount": true},
+          {"id": "year1", "label": "Year 1 Total (After Discounts)", "values": [...], "isSubtotal": true},
+          {"id": "year2", "label": "Year 2 Total", "values": [...], "isSubtotal": true},
+          {"id": "year3", "label": "Year 3 Total", "values": [...], "isSubtotal": true},
           {"id": "total3yr", "label": "3-Year Total", "values": [...], "isSubtotal": true}
         ]
       }
@@ -210,9 +243,16 @@ For Implementation Fees rows, consider: Total Implementation, GL Integration, Ca
 For Service Fees rows, consider: Tax Filing, COBRA Admin, HSA/FSA Admin, Integration Maintenance.
 Only include rows where at least one vendor has data.
 
+For Discounts section:
+- Include each unique discount found across all vendors.
+- Use negative amounts for discounts.
+- If a vendor does not have a particular discount, set amount to null and display to "N/A".
+
 For Totals:
-- Year 1 = Annual Software Subtotal + Annual Service Fees + Implementation Fees
-- Year 2 = Annual Software Subtotal + Annual Service Fees (assume same rates, no implementation)
+- Year 1 (Before Discounts) = Annual Software Subtotal + Annual Service Fees + Implementation Fees
+- Year 1 Discounts = Sum of all applicable Year 1 discounts (as negative number)
+- Year 1 Total = Year 1 (Before Discounts) + Year 1 Discounts
+- Year 2 = Annual Software Subtotal + Annual Service Fees + applicable recurring discounts
 - Year 3 = Same as Year 2
 - 3-Year Total = Year 1 + Year 2 + Year 3
 

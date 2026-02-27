@@ -1,21 +1,48 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface FileUploadProps {
   projectId: string;
   onUploadComplete: () => void;
 }
 
+interface VendorOption {
+  id: string;
+  name: string;
+  accentColor: string | null;
+}
+
+const DOCUMENT_TYPES = [
+  { value: 'initial_quote', label: 'Initial Quote' },
+  { value: 'supplemental', label: 'Supplemental Info' },
+  { value: 'updated_quote', label: 'Updated/Revised Quote' },
+];
+
 export default function FileUpload({ projectId, onUploadComplete }: FileUploadProps) {
   const [vendorName, setVendorName] = useState('');
+  const [documentType, setDocumentType] = useState('initial_quote');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [dragActive, setDragActive] = useState(false);
+  const [vendors, setVendors] = useState<VendorOption[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const vendorInputRef = useRef<HTMLInputElement>(null);
 
   const acceptedTypes = '.pdf,.xlsx,.xls,.csv,.docx,.doc,.txt';
+
+  useEffect(() => {
+    fetch('/api/vendors')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => setVendors(data))
+      .catch(() => {});
+  }, []);
+
+  const filteredVendors = vendors.filter((v) =>
+    v.name.toLowerCase().includes(vendorName.toLowerCase())
+  );
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -44,6 +71,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
     formData.append('file', file);
     formData.append('vendorName', vendorName.trim());
     formData.append('projectId', projectId);
+    formData.append('documentType', documentType);
 
     try {
       const res = await fetch('/api/documents', { method: 'POST', body: formData });
@@ -52,6 +80,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
         throw new Error(data.error || 'Upload failed');
       }
       setVendorName('');
+      setDocumentType('initial_quote');
       setFile(null);
       onUploadComplete();
     } catch (err) {
@@ -63,16 +92,61 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
+      <div className="relative">
         <label className="block text-sm font-medium text-slate-700 mb-1">Vendor Name</label>
         <input
+          ref={vendorInputRef}
           type="text"
           value={vendorName}
-          onChange={(e) => setVendorName(e.target.value)}
+          onChange={(e) => {
+            setVendorName(e.target.value);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
           className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
           placeholder="e.g., BambooHR, Paylocity, Rippling"
           required
         />
+        {showSuggestions && vendorName && filteredVendors.length > 0 && (
+          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+            {filteredVendors.map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  setVendorName(v.name);
+                  setShowSuggestions(false);
+                }}
+              >
+                {v.accentColor && (
+                  <span
+                    className="w-3 h-3 rounded-full inline-block flex-shrink-0"
+                    style={{ backgroundColor: v.accentColor }}
+                  />
+                )}
+                {v.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-700 mb-1">Document Type</label>
+        <select
+          value={documentType}
+          onChange={(e) => setDocumentType(e.target.value)}
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+        >
+          {DOCUMENT_TYPES.map((dt) => (
+            <option key={dt.value} value={dt.value}>
+              {dt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div

@@ -11,11 +11,13 @@ interface ProjectCardProps {
     status: string;
     createdAt: string;
     updatedAt: string;
+    advisor?: { id: string; name: string; email: string };
     _count: {
       documents: number;
       analyses: number;
     };
   };
+  showAdvisor?: boolean;
 }
 
 const statusColors: Record<string, string> = {
@@ -24,7 +26,7 @@ const statusColors: Record<string, string> = {
   complete: 'bg-green-100 text-green-700',
 };
 
-export default function ProjectCard({ project }: ProjectCardProps) {
+export default function ProjectCard({ project, showAdvisor }: ProjectCardProps) {
   return (
     <Link href={`/projects/${project.id}`}>
       <div className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-md hover:border-slate-300 transition cursor-pointer">
@@ -40,6 +42,11 @@ export default function ProjectCard({ project }: ProjectCardProps) {
           <span>{project._count.analyses} analysis{project._count.analyses !== 1 ? 'es' : ''}</span>
           <span>Updated {formatDate(project.updatedAt)}</span>
         </div>
+        {showAdvisor && project.advisor && (
+          <div className="mt-3 pt-3 border-t border-slate-100">
+            <span className="text-xs text-slate-400">Advisor: {project.advisor.name}</span>
+          </div>
+        )}
       </div>
     </Link>
   );

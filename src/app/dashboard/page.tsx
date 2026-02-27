@@ -13,17 +13,24 @@ interface Project {
   status: string;
   createdAt: string;
   updatedAt: string;
+  advisorId: string;
+  advisor?: { id: string; name: string; email: string };
   _count: { documents: number; analyses: number };
 }
 
+type SortBy = 'date_desc' | 'date_asc' | 'name_asc' | 'status';
+
 export default function DashboardPage() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [myProjects, setMyProjects] = useState<Project[]>([]);
+  const [teamProjects, setTeamProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [newProject, setNewProject] = useState({ name: '', clientName: '', clientEmail: '' });
+  const [newProject, setNewProject] = useState({ clientName: '', clientEmail: '' });
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortBy, setSortBy] = useState<SortBy>('date_desc');
 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login');
@@ -34,11 +41,12 @@ export default function DashboardPage() {
   }, [status]);
 
   const fetchProjects = async () => {
-    const res = await fetch('/api/projects');
-    if (res.ok) {
-      const data = await res.json();
-      setProjects(data);
-    }
+    const [mineRes, teamRes] = await Promise.all([
+      fetch('/api/projects?scope=mine'),
+      fetch('/api/projects?scope=team'),
+    ]);
+    if (mineRes.ok) setMyProjects(await mineRes.json());
+    if (teamRes.ok) setTeamProjects(await teamRes.json());
     setLoading(false);
   };
 
@@ -53,10 +61,35 @@ export default function DashboardPage() {
     if (res.ok) {
       const project = await res.json();
       setShowModal(false);
-      setNewProject({ name: '', clientName: '', clientEmail: '' });
+      setNewProject({ clientName: '', clientEmail: '' });
       router.push(`/projects/${project.id}`);
     }
     setCreating(false);
+  };
+
+  const filterAndSort = (projects: Project[]) => {
+    let filtered = projects;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.clientName.toLowerCase().includes(q) ||
+          p.advisor?.name?.toLowerCase().includes(q)
+      );
+    }
+    return filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'date_asc':
+          return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        case 'name_asc':
+          return a.clientName.localeCompare(b.clientName);
+        case 'status':
+          return a.status.localeCompare(b.status);
+        default:
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+    });
   };
 
   if (status === 'loading' || loading) {
@@ -70,11 +103,16 @@ export default function DashboardPage() {
     );
   }
 
+  const filteredMine = filterAndSort(myProjects);
+  const filteredTeam = filterAndSort(teamProjects);
+  const userRole = (session?.user as { role?: string })?.role;
+
   return (
     <div className="min-h-screen bg-slate-50">
       <Navbar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="flex justify-between items-center mb-8">
+        {/* Header */}
+        <div className="flex justify-between items-center mb-6">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
             <p className="text-sm text-slate-500 mt-1">Manage client proposal evaluations</p>
@@ -87,16 +125,62 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        {projects.length === 0 ? (
-          <div className="text-center py-20">
-            <div className="text-slate-400 text-lg mb-2">No projects yet</div>
-            <p className="text-sm text-slate-400">Create your first project to get started</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
+        {/* Search & Sort */}
+        <div className="flex gap-3 mb-6">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search projects..."
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="date_desc">Newest First</option>
+            <option value="date_asc">Oldest First</option>
+            <option value="name_asc">Client Name A-Z</option>
+            <option value="status">Status</option>
+          </select>
+        </div>
+
+        {/* My Projects */}
+        <div className="mb-10">
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">My Projects</h2>
+          {filteredMine.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
+              <div className="text-slate-400 text-lg mb-2">
+                {search ? 'No matching projects' : 'No projects yet'}
+              </div>
+              {!search && (
+                <p className="text-sm text-slate-400">Create your first project to get started</p>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredMine.map((project) => (
+                <ProjectCard key={project.id} project={project} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Team Projects */}
+        {filteredTeam.length > 0 && (
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800 mb-4">
+              Team Projects
+              <span className="text-sm font-normal text-slate-400 ml-2">
+                {userRole === 'admin' ? 'Full access' : 'View only'}
+              </span>
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredTeam.map((project) => (
+                <ProjectCard key={project.id} project={project} showAdvisor />
+              ))}
+            </div>
           </div>
         )}
 
@@ -108,42 +192,20 @@ export default function DashboardPage() {
               <form onSubmit={handleCreate} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Project Name
-                  </label>
-                  <input
-                    type="text"
-                    value={newProject.name}
-                    onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    placeholder="e.g., Acme Corp HRIS Evaluation"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Client Name
+                    Company Name
                   </label>
                   <input
                     type="text"
                     value={newProject.clientName}
                     onChange={(e) => setNewProject({ ...newProject, clientName: e.target.value })}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    placeholder="e.g., Acme Corp"
+                    placeholder="e.g., Thatcher"
                     required
                   />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Client Email <span className="text-slate-400">(optional)</span>
-                  </label>
-                  <input
-                    type="email"
-                    value={newProject.clientEmail}
-                    onChange={(e) => setNewProject({ ...newProject, clientEmail: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                    placeholder="client@company.com"
-                  />
-                </div>
+                <p className="text-xs text-slate-400">
+                  Project will be named &ldquo;{newProject.clientName || 'Company'} {new Date().toLocaleString('default', { month: 'long' })} {String(new Date().getFullYear()).slice(-2)}&rdquo;
+                </p>
                 <div className="flex gap-3 pt-2">
                   <button
                     type="button"

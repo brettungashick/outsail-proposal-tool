@@ -8,7 +8,8 @@ import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
-import { ComparisonTable as ComparisonTableType, Citation } from '@/types';
+import VendorDetailView from '@/components/VendorDetailView';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
 
 interface AnalysisData {
   id: string;
@@ -18,9 +19,12 @@ interface AnalysisData {
   vendorNotes: string;
   nextSteps: string;
   citations: string;
+  discountToggles: string | null;
   createdAt: string;
-  project: { name: string; clientName: string };
+  project: { name: string; clientName: string; isOwner?: boolean; isAdmin?: boolean };
 }
+
+type AnalysisTab = 'summary' | 'vendor-detail';
 
 export default function AnalysisPage() {
   const { status: authStatus } = useSession();
@@ -32,19 +36,25 @@ export default function AnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState<AnalysisTab>('summary');
+  const [isOwner, setIsOwner] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
   }, [authStatus, router]);
 
   const fetchAnalysis = useCallback(async (analysisId?: string) => {
-    // First get the project to find the latest analysis
     const projRes = await fetch(`/api/projects/${projectId}`);
     if (!projRes.ok) {
       setLoading(false);
       return;
     }
     const proj = await projRes.json();
+    setIsOwner(proj.isOwner);
+    setIsAdmin(proj.isAdmin);
     const targetId = analysisId || proj.analyses?.[0]?.id;
 
     if (!targetId) {
@@ -56,6 +66,14 @@ export default function AnalysisPage() {
     if (res.ok) {
       const data = await res.json();
       setAnalysis(data);
+      // Load discount toggles
+      if (data.discountToggles) {
+        try {
+          setDiscountToggles(JSON.parse(data.discountToggles));
+        } catch {
+          setDiscountToggles({});
+        }
+      }
     }
     setLoading(false);
   }, [projectId]);
@@ -75,6 +93,8 @@ export default function AnalysisPage() {
     : {};
   const nextSteps: string[] = analysis?.nextSteps ? JSON.parse(analysis.nextSteps) : [];
   const citations: Citation[] = analysis?.citations ? JSON.parse(analysis.citations) : [];
+
+  const canEdit = isOwner || isAdmin;
 
   const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
     if (!analysis) return;
@@ -106,7 +126,6 @@ export default function AnalysisPage() {
     const oldDisplay = val.display;
     val.display = newDisplayValue;
 
-    // Try to parse as number
     const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
     if (!isNaN(numVal)) {
       val.amount = numVal;
@@ -128,6 +147,30 @@ export default function AnalysisPage() {
       oldDisplay,
       newJson
     );
+  };
+
+  const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
+    const updated = { ...discountToggles };
+    if (!updated[vendorName]) updated[vendorName] = {};
+    updated[vendorName][discountId] = enabled;
+    setDiscountToggles(updated);
+
+    // Persist to server
+    if (analysis) {
+      const newVal = JSON.stringify(updated);
+      setSaving(true);
+      fetch(`/api/analysis/${analysis.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fieldType: 'discountToggles',
+          fieldPath: 'discountToggles',
+          oldValue: analysis.discountToggles || '{}',
+          newValue: newVal,
+        }),
+      }).finally(() => setSaving(false));
+      setAnalysis({ ...analysis, discountToggles: newVal });
+    }
   };
 
   const handleUpdateStandardization = (notes: string[]) => {
@@ -206,6 +249,36 @@ export default function AnalysisPage() {
               {saving && (
                 <span className="text-xs text-blue-500">Saving...</span>
               )}
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                >
+                  Export
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-10">
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        window.open(`/api/analysis/${analysis.id}/export?format=pdf`, '_blank');
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-t-lg"
+                    >
+                      Download PDF
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        window.open(`/api/analysis/${analysis.id}/export?format=excel`, '_blank');
+                      }}
+                      className="w-full text-left px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50 rounded-b-lg"
+                    >
+                      Download Excel
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => setShowHistory(true)}
                 className="border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm hover:bg-slate-50 transition"
@@ -216,37 +289,78 @@ export default function AnalysisPage() {
           </div>
         </div>
 
-        {/* Comparison Table */}
-        <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="font-semibold text-slate-900">Side-by-Side Comparison</h2>
-            <p className="text-xs text-slate-400">Click any cell to edit · Yellow = To be confirmed</p>
+        {/* Analysis Tabs */}
+        <div className="border-b border-slate-200 mb-6">
+          <div className="flex gap-8">
+            <button
+              onClick={() => setActiveTab('summary')}
+              className={`pb-3 text-sm font-medium border-b-2 transition ${
+                activeTab === 'summary'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Summary
+            </button>
+            <button
+              onClick={() => setActiveTab('vendor-detail')}
+              className={`pb-3 text-sm font-medium border-b-2 transition ${
+                activeTab === 'vendor-detail'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Vendor Detail
+            </button>
           </div>
-          <ComparisonTable
-            data={comparisonData}
-            isEditable={true}
-            onCellEdit={handleCellEdit}
-          />
         </div>
 
-        {/* Notes */}
-        <div className="mb-6">
-          <h2 className="font-semibold text-slate-900 text-lg mb-4">Analysis Notes</h2>
-          <NotesSection
-            standardizationNotes={standardizationNotes}
-            vendorNotes={vendorNotes}
-            nextSteps={nextSteps}
-            isEditable={true}
-            onUpdateStandardization={handleUpdateStandardization}
-            onUpdateVendorNotes={handleUpdateVendorNotes}
-            onUpdateNextSteps={handleUpdateNextSteps}
-          />
-        </div>
+        {activeTab === 'summary' && (
+          <>
+            {/* Comparison Table */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="font-semibold text-slate-900">Side-by-Side Comparison</h2>
+                <p className="text-xs text-slate-400">
+                  {canEdit ? 'Click any cell to edit · ' : ''}Yellow = To be confirmed
+                </p>
+              </div>
+              <ComparisonTable
+                data={comparisonData}
+                isEditable={canEdit}
+                onCellEdit={handleCellEdit}
+                discountToggles={discountToggles}
+                onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
+              />
+            </div>
 
-        {/* Citations */}
-        <div className="mb-6">
-          <CitationsSection citations={citations} />
-        </div>
+            {/* Notes */}
+            <div className="mb-6">
+              <h2 className="font-semibold text-slate-900 text-lg mb-4">Analysis Notes</h2>
+              <NotesSection
+                standardizationNotes={standardizationNotes}
+                vendorNotes={vendorNotes}
+                nextSteps={nextSteps}
+                isEditable={canEdit}
+                onUpdateStandardization={handleUpdateStandardization}
+                onUpdateVendorNotes={handleUpdateVendorNotes}
+                onUpdateNextSteps={handleUpdateNextSteps}
+              />
+            </div>
+
+            {/* Citations */}
+            <div className="mb-6">
+              <CitationsSection citations={citations} />
+            </div>
+          </>
+        )}
+
+        {activeTab === 'vendor-detail' && (
+          <VendorDetailView
+            projectId={projectId}
+            vendors={comparisonData.vendors}
+          />
+        )}
       </div>
 
       {/* Version History Sidebar */}

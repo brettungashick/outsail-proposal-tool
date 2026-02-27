@@ -65,6 +65,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     updateData.vendorNotes = newValue;
   } else if (fieldType === 'nextSteps') {
     updateData.nextSteps = newValue;
+  } else if (fieldType === 'discountToggles') {
+    updateData.discountToggles = newValue;
   }
 
   if (Object.keys(updateData).length > 0) {

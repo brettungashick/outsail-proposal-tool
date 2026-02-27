@@ -24,9 +24,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  if (project.documents.length < 2) {
+  // Filter to active documents only
+  const activeDocs = project.documents.filter((d) => d.isActive !== false);
+
+  // Count unique vendors among active docs
+  const activeVendors = new Set(activeDocs.map((d) => d.vendorName));
+  if (activeVendors.size < 2) {
     return NextResponse.json(
-      { error: 'At least 2 vendor documents are required for comparison' },
+      { error: 'At least 2 vendors with active documents are required for comparison' },
       { status: 400 }
     );
   }
@@ -45,28 +50,47 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // Step 1: Parse each document with Claude
+    // Group active documents by vendor and merge text from multiple files
+    const vendorDocs: Record<string, typeof activeDocs> = {};
+    for (const doc of activeDocs) {
+      if (!vendorDocs[doc.vendorName]) vendorDocs[doc.vendorName] = [];
+      vendorDocs[doc.vendorName].push(doc);
+    }
+
+    // Step 1: Parse each vendor's combined documents with Claude
     const parsedProposals = [];
-    for (const doc of project.documents) {
-      if (doc.parsedData) {
-        // Already parsed, reuse
+    for (const [vendor, docs] of Object.entries(vendorDocs)) {
+      // Check if all docs for this vendor are already parsed individually
+      const allParsed = docs.every((d) => d.parsedData);
+      if (allParsed && docs.length === 1) {
+        // Single doc, already parsed — reuse
+        const doc = docs[0];
         parsedProposals.push({
-          ...JSON.parse(doc.parsedData),
+          ...JSON.parse(doc.parsedData!),
           documentId: doc.id,
           documentName: doc.fileName,
         });
       } else {
+        // Merge raw text from all docs for this vendor
+        const mergedText = docs
+          .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
+          .join('\n\n');
+
+        const primaryDoc = docs[0];
         const parsed = await parseProposal(
-          doc.rawText || '',
-          doc.vendorName,
-          doc.id,
-          doc.fileName
+          mergedText,
+          vendor,
+          primaryDoc.id,
+          docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
         );
-        // Save parsed data back to document
-        await prisma.document.update({
-          where: { id: doc.id },
-          data: { parsedData: JSON.stringify(parsed) },
-        });
+
+        // Save parsed data to each individual doc
+        for (const doc of docs) {
+          await prisma.document.update({
+            where: { id: doc.id },
+            data: { parsedData: JSON.stringify(parsed) },
+          });
+        }
         parsedProposals.push(parsed);
       }
     }

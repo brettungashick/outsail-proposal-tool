@@ -16,6 +16,7 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file') as File;
   const vendorName = formData.get('vendorName') as string;
   const projectId = formData.get('projectId') as string;
+  const documentType = (formData.get('documentType') as string) || 'initial_quote';
 
   if (!file || !vendorName || !projectId) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -43,15 +44,50 @@ export async function POST(req: NextRequest) {
     rawText = 'Error extracting text from file';
   }
 
+  // Compute quoteVersion for updated quotes
+  let quoteVersion = 1;
+  if (documentType === 'updated_quote') {
+    const existingVersions = await prisma.document.findMany({
+      where: { projectId, vendorName, documentType: 'updated_quote' },
+      orderBy: { quoteVersion: 'desc' },
+      take: 1,
+    });
+    const maxExisting = existingVersions[0]?.quoteVersion || 0;
+    quoteVersion = maxExisting + 1;
+
+    // When uploading an updated quote, deactivate previous initial quotes for this vendor
+    await prisma.document.updateMany({
+      where: {
+        projectId,
+        vendorName,
+        documentType: 'initial_quote',
+      },
+      data: { isActive: false },
+    });
+
+    // Deactivate previous updated quotes for this vendor
+    await prisma.document.updateMany({
+      where: {
+        projectId,
+        vendorName,
+        documentType: 'updated_quote',
+      },
+      data: { isActive: false },
+    });
+  }
+
   // Save to database
   const document = await prisma.document.create({
     data: {
       projectId,
       vendorName,
       fileName: file.name,
-      filePath: file.name, // Original filename for display (no file on disk)
+      filePath: file.name,
       fileType,
       rawText,
+      documentType,
+      quoteVersion,
+      isActive: true,
     },
   });
 

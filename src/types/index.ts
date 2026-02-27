@@ -11,6 +11,7 @@ export interface TableRow {
   label: string;
   values: VendorValue[];
   isSubtotal?: boolean;
+  isDiscount?: boolean;
 }
 
 export interface TableSection {
@@ -39,6 +40,16 @@ export interface AnalysisResult {
   citations: Citation[];
 }
 
+export interface ParsedDiscount {
+  id: string;
+  name: string;
+  amount: number | null;
+  type: 'percentage' | 'flat' | 'unknown';
+  percentageValue: number | null;
+  rawText: string;
+  appliesToYear?: number | null; // null = all years, 1 = first year only, etc.
+}
+
 export interface ParsedProposal {
   vendorName: string;
   documentId: string;
@@ -48,7 +59,7 @@ export interface ParsedProposal {
   modules: ParsedModule[];
   implementationItems: ParsedLineItem[];
   serviceItems: ParsedLineItem[];
-  discounts: string[];
+  discounts: ParsedDiscount[];
   notableTerms: string[];
   unknowns: string[];
 }
@@ -75,3 +86,6 @@ export interface ParsedLineItem {
   rangeMin: number | null;
   rangeMax: number | null;
 }
+
+// Discount toggle state: { "VendorName": { "discountId": true/false } }
+export type DiscountToggles = Record<string, Record<string, boolean>>;
