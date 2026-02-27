@@ -80,6 +80,10 @@ export async function GET() {
     `);
 
     await addColumnSafe('Analysis', 'discountToggles', 'TEXT');
+    await addColumnSafe('Analysis', 'status', "TEXT NOT NULL DEFAULT 'complete'");
+    await addColumnSafe('Analysis', 'parsedProposals', 'TEXT');
+    await addColumnSafe('Analysis', 'clarifyingQuestions', 'TEXT');
+    await addColumnSafe('Analysis', 'advisorAnswers', 'TEXT');
 
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "AnalysisEdit" (

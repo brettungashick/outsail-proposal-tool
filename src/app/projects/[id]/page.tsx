@@ -7,6 +7,7 @@ import Sidebar from '@/components/Sidebar';
 import FileUpload from '@/components/FileUpload';
 import DocumentList from '@/components/DocumentList';
 import ShareManager from '@/components/ShareManager';
+import ClarifyingReview from '@/components/ClarifyingReview';
 
 interface Document {
   id: string;
@@ -23,6 +24,8 @@ interface Document {
 interface Analysis {
   id: string;
   version: number;
+  status?: string;
+  clarifyingQuestions?: string | null;
   createdAt: string;
 }
 
@@ -69,6 +72,10 @@ export default function ProjectPage() {
     if (res.ok) {
       const data = await res.json();
       setProject(data);
+      // Auto-switch to analysis tab if project is in clarifying state
+      if (data.status === 'clarifying') {
+        setActiveTab('analysis');
+      }
     }
     setLoading(false);
   }, [projectId]);
@@ -113,6 +120,11 @@ export default function ProjectPage() {
     }
   };
 
+  const handleFinalized = () => {
+    fetchProject();
+    router.push(`/projects/${projectId}/analysis`);
+  };
+
   if (authStatus === 'loading' || loading) {
     return (
       <Sidebar>
@@ -132,6 +144,8 @@ export default function ProjectPage() {
   }
 
   const latestAnalysis = project.analyses[0] || null;
+  const isClarifying = latestAnalysis?.status === 'clarifying';
+  const isComplete = latestAnalysis && latestAnalysis.status !== 'clarifying';
   const canEdit = project.isOwner || project.isAdmin;
 
   return (
@@ -152,6 +166,9 @@ export default function ProjectPage() {
                 {!canEdit && (
                   <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-full">View Only</span>
                 )}
+                {isClarifying && (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Needs Review</span>
+                )}
               </div>
               <p className="text-sm text-slate-500">
                 Client: {project.clientName}
@@ -161,7 +178,7 @@ export default function ProjectPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              {canEdit && project.documents.length >= 2 && (
+              {canEdit && project.documents.length >= 2 && !isClarifying && (
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
@@ -169,12 +186,12 @@ export default function ProjectPage() {
                 >
                   {analyzing
                     ? 'Analyzing... (this may take a minute)'
-                    : latestAnalysis
+                    : isComplete
                       ? 'Re-generate Analysis'
                       : 'Generate Analysis'}
                 </button>
               )}
-              {latestAnalysis && (
+              {isComplete && (
                 <button
                   onClick={() => router.push(`/projects/${projectId}/analysis`)}
                   className="border border-indigo-600 text-indigo-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-50 transition"
@@ -205,8 +222,11 @@ export default function ProjectPage() {
                     : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab === 'analysis' && isClarifying ? 'Review & Finalize' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                 {tab === 'documents' && ` (${project.documents.length})`}
+                {tab === 'analysis' && isClarifying && (
+                  <span className="ml-1.5 inline-flex items-center justify-center w-2 h-2 bg-amber-500 rounded-full" />
+                )}
               </button>
             ))}
           </div>
@@ -239,16 +259,23 @@ export default function ProjectPage() {
 
         {activeTab === 'analysis' && (
           <div>
-            {latestAnalysis ? (
+            {isClarifying && latestAnalysis ? (
+              <ClarifyingReview
+                analysisId={latestAnalysis.id}
+                questionsJson={latestAnalysis.clarifyingQuestions || '[]'}
+                onFinalized={handleFinalized}
+                readOnly={!canEdit}
+              />
+            ) : isComplete ? (
               <div className="bg-white rounded-xl border border-slate-200 p-6">
                 <div className="flex justify-between items-center mb-4">
                   <div>
                     <h2 className="font-semibold text-slate-900">
-                      Analysis v{latestAnalysis.version}
+                      Analysis v{latestAnalysis!.version}
                     </h2>
                     <p className="text-xs text-slate-400">
                       Generated on{' '}
-                      {new Date(latestAnalysis.createdAt).toLocaleDateString()}
+                      {new Date(latestAnalysis!.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                   <button

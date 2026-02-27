@@ -89,3 +89,12 @@ export interface ParsedLineItem {
 
 // Discount toggle state: { "VendorName": { "discountId": true/false } }
 export type DiscountToggles = Record<string, Record<string, boolean>>;
+
+export interface ClarifyingQuestion {
+  id: string;
+  category: 'missing_data' | 'ambiguity' | 'discrepancy' | 'assumption' | 'general';
+  vendorName: string | null; // null = applies to all vendors
+  question: string;
+  context: string; // explanation of why this matters
+  suggestedDefault: string | null; // AI's best guess if advisor skips
+}

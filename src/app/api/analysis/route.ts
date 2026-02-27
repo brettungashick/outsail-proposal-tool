@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { parseProposal, generateComparison, isApiKeyConfigured } from '@/lib/claude';
+import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -60,10 +60,8 @@ export async function POST(req: NextRequest) {
     // Step 1: Parse each vendor's combined documents with Claude
     const parsedProposals = [];
     for (const [vendor, docs] of Object.entries(vendorDocs)) {
-      // Check if all docs for this vendor are already parsed individually
       const allParsed = docs.every((d) => d.parsedData);
       if (allParsed && docs.length === 1) {
-        // Single doc, already parsed — reuse
         const doc = docs[0];
         parsedProposals.push({
           ...JSON.parse(doc.parsedData!),
@@ -71,7 +69,6 @@ export async function POST(req: NextRequest) {
           documentName: doc.fileName,
         });
       } else {
-        // Merge raw text from all docs for this vendor
         const mergedText = docs
           .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
           .join('\n\n');
@@ -84,7 +81,6 @@ export async function POST(req: NextRequest) {
           docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
         );
 
-        // Save parsed data to each individual doc
         for (const doc of docs) {
           await prisma.document.update({
             where: { id: doc.id },
@@ -95,8 +91,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Step 2: Generate comparison
-    const analysisResult = await generateComparison(parsedProposals);
+    // Step 2: Generate clarifying questions
+    const questions = await generateClarifyingQuestions(parsedProposals);
 
     // Step 3: Determine version number
     const lastAnalysis = await prisma.analysis.findFirst({
@@ -105,24 +101,23 @@ export async function POST(req: NextRequest) {
     });
     const version = (lastAnalysis?.version || 0) + 1;
 
-    // Step 4: Save analysis
+    // Step 4: Save draft analysis with questions (no comparison yet)
     const analysis = await prisma.analysis.create({
       data: {
         projectId,
         version,
-        comparisonData: JSON.stringify(analysisResult.comparisonTable),
-        standardizationNotes: JSON.stringify(analysisResult.standardizationNotes),
-        vendorNotes: JSON.stringify(analysisResult.vendorNotes),
-        nextSteps: JSON.stringify(analysisResult.nextSteps),
-        citations: JSON.stringify(analysisResult.citations),
+        status: 'clarifying',
+        comparisonData: '{}', // placeholder until finalized
+        parsedProposals: JSON.stringify(parsedProposals),
+        clarifyingQuestions: JSON.stringify(questions),
         createdBy: userId,
       },
     });
 
-    // Update project status
+    // Update project status to clarifying
     await prisma.project.update({
       where: { id: projectId },
-      data: { status: 'complete' },
+      data: { status: 'clarifying' },
     });
 
     return NextResponse.json(analysis, { status: 201 });

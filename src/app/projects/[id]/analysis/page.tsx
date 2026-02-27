@@ -55,7 +55,13 @@ export default function AnalysisPage() {
     const proj = await projRes.json();
     setIsOwner(proj.isOwner);
     setIsAdmin(proj.isAdmin);
-    const targetId = analysisId || proj.analyses?.[0]?.id;
+    const latestAnalysis = proj.analyses?.[0];
+    // If the latest analysis is still in clarifying state, redirect to project page
+    if (latestAnalysis?.status === 'clarifying' && !analysisId) {
+      router.push(`/projects/${projectId}`);
+      return;
+    }
+    const targetId = analysisId || latestAnalysis?.id;
 
     if (!targetId) {
       setLoading(false);
@@ -65,6 +71,11 @@ export default function AnalysisPage() {
     const res = await fetch(`/api/analysis/${targetId}`);
     if (res.ok) {
       const data = await res.json();
+      // Double-check status from full analysis data
+      if (data.status === 'clarifying') {
+        router.push(`/projects/${projectId}`);
+        return;
+      }
       setAnalysis(data);
       // Load discount toggles
       if (data.discountToggles) {

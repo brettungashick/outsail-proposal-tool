@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ParsedProposal, AnalysisResult } from '@/types';
+import { ParsedProposal, AnalysisResult, ClarifyingQuestion } from '@/types';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -114,7 +114,8 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
 }
 
 export async function generateComparison(
-  parsedProposals: ParsedProposal[]
+  parsedProposals: ParsedProposal[],
+  advisorContext?: string
 ): Promise<AnalysisResult> {
   const vendorNames = parsedProposals.map((p) => p.vendorName);
   const headcounts = parsedProposals
@@ -136,7 +137,7 @@ CRITICAL RULES:
 
 PARSED PROPOSALS:
 ${JSON.stringify(parsedProposals, null, 2)}
-
+${advisorContext ? `\n${advisorContext}\n\nIMPORTANT: Use the advisor's clarifications above to resolve ambiguities, fill in missing data, and adjust your analysis accordingly. The advisor has domain expertise — prioritize their input over assumptions.\n` : ''}
 BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no markdown, no explanation):
 
 {
@@ -273,4 +274,60 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
 
   const result: AnalysisResult = JSON.parse(cleanText);
   return result;
+}
+
+export async function generateClarifyingQuestions(
+  parsedProposals: ParsedProposal[]
+): Promise<ClarifyingQuestion[]> {
+  const vendorNames = parsedProposals.map((p) => p.vendorName);
+
+  const prompt = `You are an expert HRIS/HR Tech proposal analyst reviewing ${parsedProposals.length} parsed vendor proposals from: ${vendorNames.join(', ')}.
+
+Before generating a final comparison, you need to identify any areas of uncertainty, missing data, ambiguities, or assumptions that an experienced advisor should review.
+
+PARSED PROPOSALS:
+${JSON.stringify(parsedProposals, null, 2)}
+
+Analyze the proposals and generate clarifying questions. Focus on:
+
+1. **Missing Data**: Key pricing fields that are null or "To be confirmed" — ask if the advisor has this info from emails, calls, or other docs.
+2. **Ambiguities**: Pricing that could be interpreted multiple ways (e.g., unclear if a fee is monthly vs annual, per-employee vs flat).
+3. **Discrepancies**: Differences between vendors that seem unusual (e.g., one vendor includes a module free that others charge for — is it truly included or missing from their quote?).
+4. **Assumptions**: Things the AI would need to assume for the comparison (e.g., headcount normalization, contract term alignment, how to handle price ranges).
+5. **General**: Any other observations the advisor should verify before the comparison is finalized.
+
+RULES:
+- Generate between 3-8 questions. Focus on the most impactful items.
+- Be specific — reference exact vendor names, module names, and dollar amounts.
+- Each question should be actionable — the advisor can either provide a concrete answer or confirm the AI's suggested default.
+- Do NOT ask generic questions. Every question should be grounded in something specific from the parsed data.
+- Sort by importance: missing data and discrepancies first, assumptions last.
+
+Return ONLY valid JSON (no markdown, no explanation) as an array:
+[
+  {
+    "id": "q1",
+    "category": "missing_data|ambiguity|discrepancy|assumption|general",
+    "vendorName": "<specific vendor name or null if applies to all>",
+    "question": "<the question for the advisor>",
+    "context": "<brief explanation of why this matters for the comparison>",
+    "suggestedDefault": "<what the AI would assume if the advisor skips this, or null>"
+  }
+]`;
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
+
+  let cleanText = responseText.trim();
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  const questions: ClarifyingQuestion[] = JSON.parse(cleanText);
+  return questions;
 }
