@@ -43,17 +43,30 @@ export default function EditableCell({
     }
   };
 
-  const bgColor = !isConfirmed
-    ? 'bg-yellow-50'
-    : value === 'Not included'
-      ? 'bg-slate-50'
-      : value === 'Included in bundle'
-        ? 'bg-blue-50'
-        : '';
+  const lowerValue = value.toLowerCase();
+  const isIncluded = lowerValue === 'included' || lowerValue === 'included in bundle';
+  const isNotIncluded = lowerValue === 'not included';
+  const isUnconfirmed = !isConfirmed;
+  const isCurrency = /^\$[\d,]+/.test(value);
+
+  // Determine cell styling based on value
+  let cellBg = '';
+  let textClass = 'text-slate-900';
+
+  if (isIncluded) {
+    cellBg = '';
+    textClass = 'text-green-600';
+  } else if (isNotIncluded) {
+    cellBg = '';
+    textClass = 'text-red-500';
+  } else if (isUnconfirmed) {
+    cellBg = 'bg-yellow-50';
+    textClass = 'text-amber-700';
+  }
 
   if (editing && isEditable) {
     return (
-      <td className="px-3 py-2 border border-slate-200">
+      <div className="px-3 py-2">
         <input
           ref={inputRef}
           type="text"
@@ -61,28 +74,46 @@ export default function EditableCell({
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={handleSave}
           onKeyDown={handleKeyDown}
-          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          className="w-full px-2 py-1 border border-indigo-400 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
         />
-      </td>
+      </div>
     );
   }
 
   return (
-    <td
-      className={`px-3 py-2 border border-slate-200 text-sm ${bgColor} ${
-        isEditable ? 'cursor-pointer hover:bg-blue-50/50' : ''
+    <div
+      className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
+        isEditable ? 'cursor-pointer hover:bg-indigo-50/50' : ''
       }`}
       onClick={() => isEditable && setEditing(true)}
       title={note || undefined}
     >
-      <div className="flex items-center gap-1">
-        <span className={!isConfirmed ? 'text-amber-700' : 'text-slate-900'}>{value}</span>
-        {note && (
-          <span className="text-xs text-amber-500 ml-1" title={note}>
-            *
-          </span>
+      <div className="flex items-center justify-center gap-1.5">
+        {isIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : isNotIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : (
+          <>
+            <span className={`${textClass} ${isCurrency ? 'font-medium' : ''}`}>{value}</span>
+            {note && (
+              <span className="text-xs text-amber-500" title={note}>
+                *
+              </span>
+            )}
+          </>
         )}
       </div>
-    </td>
+    </div>
   );
 }

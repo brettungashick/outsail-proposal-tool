@@ -5,9 +5,15 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+  --sidebar-bg: #F0EDFF;
+  --indigo-primary: #4F46E5;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
+}
+
+.bg-sidebar {
+  background-color: var(--sidebar-bg);
 }

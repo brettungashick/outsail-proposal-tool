@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 
 interface Vendor {
   id: string;
@@ -90,16 +90,14 @@ export default function VendorSettingsPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -112,7 +110,7 @@ export default function VendorSettingsPage() {
               setForm({ name: '', logoUrl: '', accentColor: '#0066CC' });
               setShowForm(true);
             }}
-            className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
           >
             + Add Vendor
           </button>
@@ -149,7 +147,7 @@ export default function VendorSettingsPage() {
                   <td className="px-6 py-3 text-right">
                     <button
                       onClick={() => handleEdit(vendor)}
-                      className="text-xs text-blue-600 hover:text-blue-800 mr-3"
+                      className="text-xs text-indigo-600 hover:text-indigo-800 mr-3"
                     >
                       Edit
                     </button>
@@ -187,7 +185,7 @@ export default function VendorSettingsPage() {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                     placeholder="e.g., ADP"
                     required
                   />
@@ -200,7 +198,7 @@ export default function VendorSettingsPage() {
                     type="url"
                     value={form.logoUrl}
                     onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                     placeholder="https://example.com/logo.png"
                   />
                 </div>
@@ -217,7 +215,7 @@ export default function VendorSettingsPage() {
                       type="text"
                       value={form.accentColor}
                       onChange={(e) => setForm({ ...form, accentColor: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                       placeholder="#0066CC"
                     />
                   </div>
@@ -242,7 +240,7 @@ export default function VendorSettingsPage() {
                   <button
                     type="submit"
                     disabled={saving}
-                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+                    className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                   >
                     {saving ? 'Saving...' : editingId ? 'Update' : 'Add Vendor'}
                   </button>
@@ -252,6 +250,6 @@ export default function VendorSettingsPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

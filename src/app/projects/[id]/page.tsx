@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 import FileUpload from '@/components/FileUpload';
 import DocumentList from '@/components/DocumentList';
 import ShareManager from '@/components/ShareManager';
@@ -115,21 +115,19 @@ export default function ProjectPage() {
 
   if (authStatus === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">
           Project not found
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
@@ -137,14 +135,13 @@ export default function ProjectPage() {
   const canEdit = project.isOwner || project.isAdmin;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
           <button
             onClick={() => router.push('/dashboard')}
-            className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block"
+            className="text-sm text-indigo-600 hover:text-indigo-800 mb-2 inline-block"
           >
             ← Back to Projects
           </button>
@@ -168,7 +165,7 @@ export default function ProjectPage() {
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                 >
                   {analyzing
                     ? 'Analyzing... (this may take a minute)'
@@ -180,7 +177,7 @@ export default function ProjectPage() {
               {latestAnalysis && (
                 <button
                   onClick={() => router.push(`/projects/${projectId}/analysis`)}
-                  className="border border-blue-600 text-blue-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition"
+                  className="border border-indigo-600 text-indigo-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-50 transition"
                 >
                   View Analysis
                 </button>
@@ -204,7 +201,7 @@ export default function ProjectPage() {
                 onClick={() => setActiveTab(tab)}
                 className={`pb-3 text-sm font-medium border-b-2 transition ${
                   activeTab === tab
-                    ? 'border-blue-600 text-blue-600'
+                    ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -256,7 +253,7 @@ export default function ProjectPage() {
                   </div>
                   <button
                     onClick={() => router.push(`/projects/${projectId}/analysis`)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
                   >
                     Open Full Analysis
                   </button>
@@ -277,7 +274,7 @@ export default function ProjectPage() {
                   <button
                     onClick={handleAnalyze}
                     disabled={analyzing}
-                    className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+                    className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                   >
                     {analyzing ? 'Analyzing...' : 'Generate Analysis'}
                   </button>
@@ -302,6 +299,6 @@ export default function ProjectPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

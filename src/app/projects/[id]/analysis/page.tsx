@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
@@ -199,39 +199,36 @@ export default function AnalysisPage() {
 
   if (authStatus === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   if (!analysis || !comparisonData) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center">
           <p className="text-slate-500 mb-4">No analysis available</p>
           <button
             onClick={() => router.push(`/projects/${projectId}`)}
-            className="text-blue-600 hover:text-blue-800 text-sm"
+            className="text-indigo-600 hover:text-indigo-800 text-sm"
           >
             ← Back to Project
           </button>
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
           <button
             onClick={() => router.push(`/projects/${projectId}`)}
-            className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block"
+            className="text-sm text-indigo-600 hover:text-indigo-800 mb-2 inline-block"
           >
             ← Back to Project
           </button>
@@ -247,12 +244,12 @@ export default function AnalysisPage() {
             </div>
             <div className="flex items-center gap-3">
               {saving && (
-                <span className="text-xs text-blue-500">Saving...</span>
+                <span className="text-xs text-indigo-500">Saving...</span>
               )}
               <div className="relative">
                 <button
                   onClick={() => setShowExportMenu(!showExportMenu)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
                 >
                   Export
                 </button>
@@ -296,7 +293,7 @@ export default function AnalysisPage() {
               onClick={() => setActiveTab('summary')}
               className={`pb-3 text-sm font-medium border-b-2 transition ${
                 activeTab === 'summary'
-                  ? 'border-blue-600 text-blue-600'
+                  ? 'border-indigo-600 text-indigo-600'
                   : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -306,7 +303,7 @@ export default function AnalysisPage() {
               onClick={() => setActiveTab('vendor-detail')}
               className={`pb-3 text-sm font-medium border-b-2 transition ${
                 activeTab === 'vendor-detail'
-                  ? 'border-blue-600 text-blue-600'
+                  ? 'border-indigo-600 text-indigo-600'
                   : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
@@ -373,6 +370,6 @@ export default function AnalysisPage() {
           fetchAnalysis(versionId);
         }}
       />
-    </div>
+    </Sidebar>
   );
 }

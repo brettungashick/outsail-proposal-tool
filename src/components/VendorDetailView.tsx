@@ -87,7 +87,7 @@ export default function VendorDetailView({ projectId, vendors }: VendorDetailVie
             onClick={() => setSelectedVendor(v)}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
               selectedVendor === v
-                ? 'bg-blue-600 text-white'
+                ? 'bg-indigo-600 text-white'
                 : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
             }`}
           >
@@ -110,14 +110,14 @@ export default function VendorDetailView({ projectId, vendors }: VendorDetailVie
                   <div
                     key={doc.id}
                     className={`flex items-center justify-between border rounded-lg px-4 py-3 ${
-                      doc.isActive ? 'border-blue-200 bg-blue-50/30' : 'border-slate-200'
+                      doc.isActive ? 'border-indigo-200 bg-indigo-50/30' : 'border-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div
                         className={`w-2 h-2 rounded-full ${
                           doc.documentType === 'initial_quote'
-                            ? 'bg-blue-500'
+                            ? 'bg-indigo-500'
                             : doc.documentType === 'updated_quote'
                               ? 'bg-purple-500'
                               : 'bg-amber-500'
@@ -211,7 +211,7 @@ export default function VendorDetailView({ projectId, vendors }: VendorDetailVie
                     <tr>
                       <td
                         colSpan={4}
-                        className="px-4 py-2 text-sm font-semibold text-white bg-blue-600"
+                        className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600"
                       >
                         Software Fees
                       </td>

@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 
 interface BenchmarkResult {
   projectId: string;
@@ -52,16 +52,14 @@ export default function BenchmarksPage() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">Benchmarks</h1>
@@ -80,7 +78,7 @@ export default function BenchmarksPage() {
                 value={vendorSearch}
                 onChange={(e) => setVendorSearch(e.target.value)}
                 placeholder="e.g., Paylocity, ADP"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
               />
             </div>
             <div>
@@ -90,7 +88,7 @@ export default function BenchmarksPage() {
                 value={minHeadcount}
                 onChange={(e) => setMinHeadcount(e.target.value)}
                 placeholder="e.g., 50"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
               />
             </div>
             <div>
@@ -100,7 +98,7 @@ export default function BenchmarksPage() {
                 value={maxHeadcount}
                 onChange={(e) => setMaxHeadcount(e.target.value)}
                 placeholder="e.g., 200"
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
               />
             </div>
             <div>
@@ -108,7 +106,7 @@ export default function BenchmarksPage() {
               <select
                 value={months}
                 onChange={(e) => setMonths(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
               >
                 <option value="6">Last 6 months</option>
                 <option value="12">Last 12 months</option>
@@ -121,7 +119,7 @@ export default function BenchmarksPage() {
             <button
               onClick={handleSearch}
               disabled={loading}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              className="bg-indigo-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
             >
               {loading ? 'Searching...' : 'Search'}
             </button>
@@ -158,7 +156,7 @@ export default function BenchmarksPage() {
                   {r.vendors.map((v) => (
                     <span
                       key={v}
-                      className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded"
+                      className="text-xs bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded"
                     >
                       {v}
                     </span>
@@ -191,6 +189,6 @@ export default function BenchmarksPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

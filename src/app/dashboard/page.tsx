@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 import ProjectCard from '@/components/ProjectCard';
 
 interface Project {
@@ -94,12 +94,11 @@ export default function DashboardPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12">
           <div className="text-center text-slate-500">Loading...</div>
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
@@ -108,9 +107,8 @@ export default function DashboardPage() {
   const userRole = (session?.user as { role?: string })?.role;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <Sidebar>
+      <div className="max-w-7xl mx-auto px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -119,7 +117,7 @@ export default function DashboardPage() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition"
+            className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
           >
             + New Project
           </button>
@@ -132,12 +130,12 @@ export default function DashboardPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search projects..."
-            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+            className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
           />
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as SortBy)}
-            className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
           >
             <option value="date_desc">Newest First</option>
             <option value="date_asc">Oldest First</option>
@@ -198,7 +196,7 @@ export default function DashboardPage() {
                     type="text"
                     value={newProject.clientName}
                     onChange={(e) => setNewProject({ ...newProject, clientName: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
                     placeholder="e.g., Thatcher"
                     required
                   />
@@ -217,7 +215,7 @@ export default function DashboardPage() {
                   <button
                     type="submit"
                     disabled={creating}
-                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50"
+                    className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
                   >
                     {creating ? 'Creating...' : 'Create Project'}
                   </button>
@@ -227,6 +225,6 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

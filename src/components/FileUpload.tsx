@@ -104,7 +104,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
           }}
           onFocus={() => setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
           placeholder="e.g., BambooHR, Paylocity, Rippling"
           required
         />
@@ -139,7 +139,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
         <select
           value={documentType}
           onChange={(e) => setDocumentType(e.target.value)}
-          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white"
+          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
         >
           {DOCUMENT_TYPES.map((dt) => (
             <option key={dt.value} value={dt.value}>
@@ -152,7 +152,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
       <div
         className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition ${
           dragActive
-            ? 'border-blue-500 bg-blue-50'
+            ? 'border-indigo-500 bg-indigo-50'
             : file
               ? 'border-green-400 bg-green-50'
               : 'border-slate-300 hover:border-slate-400'
@@ -194,7 +194,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
       <button
         type="submit"
         disabled={uploading || !file || !vendorName.trim()}
-        className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        className="w-full bg-indigo-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {uploading ? 'Uploading & Processing...' : 'Upload Proposal'}
       </button>
