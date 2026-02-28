@@ -35,9 +35,9 @@ const statusDots: Record<string, string> = {
 export default function ProjectCard({ project, showAdvisor }: ProjectCardProps) {
   return (
     <Link href={`/projects/${project.id}`}>
-      <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md hover:border-indigo-200 transition cursor-pointer group">
+      <div className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md hover:border-outsail-blue/30 transition cursor-pointer group">
         <div className="flex justify-between items-start mb-3">
-          <h3 className="font-semibold text-slate-900 group-hover:text-indigo-700 transition">{project.name}</h3>
+          <h3 className="font-semibold text-slate-900 group-hover:text-outsail-blue-dark transition">{project.name}</h3>
           <span className={`text-xs px-2.5 py-1 rounded-full font-medium flex items-center gap-1.5 ${statusColors[project.status] || statusColors.draft}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${statusDots[project.status] || statusDots.draft}`} />
             {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
@@ -51,7 +51,7 @@ export default function ProjectCard({ project, showAdvisor }: ProjectCardProps) 
         {showAdvisor && project.advisor && (
           <div className="mt-3 pt-3 border-t border-slate-100">
             <div className="flex items-center gap-2">
-              <div className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-medium text-indigo-600">
+              <div className="w-5 h-5 rounded-full bg-outsail-blue/20 flex items-center justify-center text-xs font-medium text-outsail-blue">
                 {project.advisor.name.charAt(0)}
               </div>
               <span className="text-xs text-slate-500">{project.advisor.name}</span>

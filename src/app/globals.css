@@ -5,8 +5,11 @@
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
-  --sidebar-bg: #F0EDFF;
-  --indigo-primary: #4F46E5;
+  --sidebar-bg: #ebeff2;
+  --outsail-blue: #4277c7;
+  --outsail-blue-dark: #0052cc;
+  --outsail-navy: #082f69;
+  --outsail-cyan: #00c1ff;
 }
 
 body {

@@ -11,6 +11,13 @@ const config: Config = {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        outsail: {
+          blue: '#4277c7',
+          'blue-dark': '#0052cc',
+          navy: '#082f69',
+          cyan: '#00c1ff',
+          light: '#ebeff2',
+        },
       },
     },
   },

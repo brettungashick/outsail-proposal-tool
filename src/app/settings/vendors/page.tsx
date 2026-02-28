@@ -22,6 +22,8 @@ export default function VendorSettingsPage() {
   const [form, setForm] = useState({ name: '', logoUrl: '', accentColor: '#0066CC' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [logoValid, setLogoValid] = useState<boolean | null>(null);
+  const [logoLoading, setLogoLoading] = useState(false);
 
   const userRole = (session?.user as { role?: string })?.role;
 
@@ -40,8 +42,34 @@ export default function VendorSettingsPage() {
     setLoading(false);
   };
 
+  // Validate logo URL when it changes
+  useEffect(() => {
+    if (!form.logoUrl) {
+      setLogoValid(null);
+      return;
+    }
+    try {
+      new URL(form.logoUrl);
+    } catch {
+      setLogoValid(false);
+      return;
+    }
+    setLogoLoading(true);
+    const img = new window.Image();
+    img.onload = () => { setLogoValid(true); setLogoLoading(false); };
+    img.onerror = () => { setLogoValid(false); setLogoLoading(false); };
+    img.src = form.logoUrl;
+  }, [form.logoUrl]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Block submit if logo URL is provided but invalid
+    if (form.logoUrl && logoValid === false) {
+      setError('The logo URL could not be loaded. Please check the link.');
+      return;
+    }
+
     setSaving(true);
     setError('');
 
@@ -108,9 +136,10 @@ export default function VendorSettingsPage() {
             onClick={() => {
               setEditingId(null);
               setForm({ name: '', logoUrl: '', accentColor: '#0066CC' });
+              setLogoValid(null);
               setShowForm(true);
             }}
-            className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
+            className="bg-outsail-blue-dark text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-outsail-navy transition"
           >
             + Add Vendor
           </button>
@@ -121,9 +150,8 @@ export default function VendorSettingsPage() {
           <table className="w-full">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200">
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Color</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Logo</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Vendor Name</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Logo URL</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Accent Color</th>
                 <th className="px-6 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
               </tr>
@@ -132,22 +160,48 @@ export default function VendorSettingsPage() {
               {vendors.map((vendor) => (
                 <tr key={vendor.id} className="border-b border-slate-100 hover:bg-slate-50">
                   <td className="px-6 py-3">
-                    <div
-                      className="w-8 h-8 rounded-full border border-slate-200"
-                      style={{ backgroundColor: vendor.accentColor || '#94a3b8' }}
-                    />
+                    {vendor.logoUrl ? (
+                      <div className="w-10 h-10 rounded-lg border border-slate-200 bg-white flex items-center justify-center overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={vendor.logoUrl}
+                          alt={vendor.name}
+                          className="max-w-full max-h-full object-contain"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                          }}
+                        />
+                        <div
+                          className="w-full h-full rounded-lg hidden items-center justify-center"
+                          style={{ backgroundColor: vendor.accentColor || '#94a3b8' }}
+                        >
+                          <span className="text-white text-xs font-bold">{vendor.name.charAt(0)}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        className="w-10 h-10 rounded-lg border border-slate-200 flex items-center justify-center"
+                        style={{ backgroundColor: vendor.accentColor || '#94a3b8' }}
+                      >
+                        <span className="text-white text-xs font-bold">{vendor.name.charAt(0)}</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-6 py-3 text-sm font-medium text-slate-900">{vendor.name}</td>
-                  <td className="px-6 py-3 text-sm text-slate-500 truncate max-w-[200px]">
-                    {vendor.logoUrl || '—'}
-                  </td>
-                  <td className="px-6 py-3 text-sm text-slate-500 font-mono">
-                    {vendor.accentColor || '—'}
+                  <td className="px-6 py-3">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-5 h-5 rounded-full border border-slate-200"
+                        style={{ backgroundColor: vendor.accentColor || '#94a3b8' }}
+                      />
+                      <span className="text-sm text-slate-500 font-mono">{vendor.accentColor || '—'}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-3 text-right">
                     <button
                       onClick={() => handleEdit(vendor)}
-                      className="text-xs text-indigo-600 hover:text-indigo-800 mr-3"
+                      className="text-xs text-outsail-blue hover:text-outsail-blue-dark mr-3"
                     >
                       Edit
                     </button>
@@ -162,7 +216,7 @@ export default function VendorSettingsPage() {
               ))}
               {vendors.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-sm text-slate-400">
+                  <td colSpan={4} className="px-6 py-12 text-center text-sm text-slate-400">
                     No vendors yet. Run /api/seed to create defaults, or add manually.
                   </td>
                 </tr>
@@ -185,7 +239,7 @@ export default function VendorSettingsPage() {
                     type="text"
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none"
                     placeholder="e.g., ADP"
                     required
                   />
@@ -198,9 +252,42 @@ export default function VendorSettingsPage() {
                     type="url"
                     value={form.logoUrl}
                     onChange={(e) => setForm({ ...form, logoUrl: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                    className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none ${
+                      form.logoUrl && logoValid === false
+                        ? 'border-red-300 bg-red-50'
+                        : form.logoUrl && logoValid === true
+                          ? 'border-green-300'
+                          : 'border-slate-300'
+                    }`}
                     placeholder="https://example.com/logo.png"
                   />
+                  {/* Logo Preview */}
+                  {form.logoUrl && (
+                    <div className="mt-2">
+                      {logoLoading && (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          <div className="w-3 h-3 border-2 border-slate-300 border-t-outsail-blue rounded-full animate-spin" />
+                          Checking image...
+                        </div>
+                      )}
+                      {logoValid === true && (
+                        <div className="flex items-center gap-3 p-2 bg-slate-50 rounded-lg border border-slate-200">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={form.logoUrl}
+                            alt="Logo preview"
+                            className="h-10 max-w-[120px] object-contain"
+                          />
+                          <span className="text-xs text-green-600">Logo looks good</span>
+                        </div>
+                      )}
+                      {logoValid === false && !logoLoading && (
+                        <p className="text-xs text-red-500 mt-1">
+                          Could not load image from this URL. Make sure it points to a valid image file (PNG, JPG, SVG).
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Accent Color</label>
@@ -215,7 +302,7 @@ export default function VendorSettingsPage() {
                       type="text"
                       value={form.accentColor}
                       onChange={(e) => setForm({ ...form, accentColor: e.target.value })}
-                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      className="flex-1 px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none"
                       placeholder="#0066CC"
                     />
                   </div>
@@ -239,8 +326,8 @@ export default function VendorSettingsPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={saving}
-                    className="flex-1 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
+                    disabled={saving || (!!form.logoUrl && logoValid === false)}
+                    className="flex-1 bg-outsail-blue-dark text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
                   >
                     {saving ? 'Saving...' : editingId ? 'Update' : 'Add Vendor'}
                   </button>

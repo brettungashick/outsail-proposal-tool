@@ -10,10 +10,23 @@ export async function GET(req: NextRequest) {
   }
 
   const searchParams = req.nextUrl.searchParams;
-  const vendorsParam = searchParams.get('vendors'); // comma-separated
+  const vendorIdsParam = searchParams.get('vendorIds'); // comma-separated vendor IDs
   const minHeadcount = parseInt(searchParams.get('minHeadcount') || '0') || 0;
   const maxHeadcount = parseInt(searchParams.get('maxHeadcount') || '0') || 0;
   const months = parseInt(searchParams.get('months') || '12') || 12;
+
+  // Load vendor lookup table for enriching results
+  const allVendors = await prisma.vendor.findMany();
+  const vendorMap = new Map(allVendors.map((v) => [v.name.toLowerCase(), v]));
+
+  // Resolve selected vendor IDs to names for filtering
+  let filterVendorNames: string[] = [];
+  if (vendorIdsParam) {
+    const selectedIds = vendorIdsParam.split(',').map((id) => id.trim());
+    filterVendorNames = allVendors
+      .filter((v) => selectedIds.includes(v.id))
+      .map((v) => v.name.toLowerCase());
+  }
 
   // Get all completed projects with their latest analysis
   const cutoffDate = new Date();
@@ -53,11 +66,10 @@ export async function GET(req: NextRequest) {
       const vendors: string[] = comparisonData.vendors || [];
       const headcount: number | null = comparisonData.normalizedHeadcount || null;
 
-      // Filter by vendors if specified
-      if (vendorsParam) {
-        const searchVendors = vendorsParam.split(',').map((v) => v.trim().toLowerCase());
+      // Filter by selected vendor objects
+      if (filterVendorNames.length > 0) {
         const hasMatch = vendors.some((v) =>
-          searchVendors.some((sv) => v.toLowerCase().includes(sv))
+          filterVendorNames.some((fv) => v.toLowerCase().includes(fv))
         );
         if (!hasMatch) return null;
       }
@@ -90,13 +102,23 @@ export async function GET(req: NextRequest) {
         });
       }
 
+      // Enrich vendors with Vendor object data (logo, color)
+      const vendorsEnriched = vendors.map((v) => {
+        const vendorObj = vendorMap.get(v.toLowerCase());
+        return {
+          name: v,
+          logoUrl: vendorObj?.logoUrl || null,
+          accentColor: vendorObj?.accentColor || null,
+        };
+      });
+
       return {
         projectId: p.id,
         projectName: p.name,
         clientName: p.clientName,
         advisorName: p.advisor.name,
         date: p.updatedAt,
-        vendors,
+        vendors: vendorsEnriched,
         headcount,
         year1Totals,
         total3yr,

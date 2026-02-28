@@ -62,6 +62,8 @@ export default function ProjectPage() {
   const [activeTab, setActiveTab] = useState<'documents' | 'analysis' | 'sharing'>('documents');
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -125,6 +127,23 @@ export default function ProjectPage() {
     router.push(`/projects/${projectId}/analysis`);
   };
 
+  const handleDeleteProject = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Delete failed');
+      }
+      router.push('/dashboard');
+    } catch (err) {
+      setAnalyzeError(err instanceof Error ? err.message : 'Delete failed');
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (authStatus === 'loading' || loading) {
     return (
       <Sidebar>
@@ -155,7 +174,7 @@ export default function ProjectPage() {
         <div className="mb-6">
           <button
             onClick={() => router.push('/dashboard')}
-            className="text-sm text-indigo-600 hover:text-indigo-800 mb-2 inline-block"
+            className="text-sm text-outsail-blue hover:text-outsail-blue-dark mb-2 inline-block"
           >
             ← Back to Projects
           </button>
@@ -182,7 +201,7 @@ export default function ProjectPage() {
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
-                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
+                  className="bg-outsail-blue-dark text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
                 >
                   {analyzing
                     ? 'Analyzing... (this may take a minute)'
@@ -191,10 +210,21 @@ export default function ProjectPage() {
                       : 'Generate Analysis'}
                 </button>
               )}
+              {canEdit && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="border border-red-200 text-red-500 px-3 py-2 rounded-lg text-sm hover:bg-red-50 transition"
+                  title="Delete Project"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                  </svg>
+                </button>
+              )}
               {isComplete && (
                 <button
                   onClick={() => router.push(`/projects/${projectId}/analysis`)}
-                  className="border border-indigo-600 text-indigo-600 px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-50 transition"
+                  className="border border-outsail-blue text-outsail-blue px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-blue/5 transition"
                 >
                   View Analysis
                 </button>
@@ -218,7 +248,7 @@ export default function ProjectPage() {
                 onClick={() => setActiveTab(tab)}
                 className={`pb-3 text-sm font-medium border-b-2 transition ${
                   activeTab === tab
-                    ? 'border-indigo-600 text-indigo-600'
+                    ? 'border-outsail-blue-dark text-outsail-blue-dark'
                     : 'border-transparent text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -262,8 +292,17 @@ export default function ProjectPage() {
             {isClarifying && latestAnalysis ? (
               <ClarifyingReview
                 analysisId={latestAnalysis.id}
+                projectId={projectId}
                 questionsJson={latestAnalysis.clarifyingQuestions || '[]'}
+                documents={project.documents.map((d) => ({
+                  id: d.id,
+                  vendorName: d.vendorName,
+                  fileName: d.fileName,
+                  documentType: d.documentType || 'initial_quote',
+                  isActive: d.isActive !== false,
+                }))}
                 onFinalized={handleFinalized}
+                onDocumentsChanged={fetchProject}
                 readOnly={!canEdit}
               />
             ) : isComplete ? (
@@ -280,7 +319,7 @@ export default function ProjectPage() {
                   </div>
                   <button
                     onClick={() => router.push(`/projects/${projectId}/analysis`)}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition"
+                    className="bg-outsail-blue-dark text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-navy transition"
                   >
                     Open Full Analysis
                   </button>
@@ -301,7 +340,7 @@ export default function ProjectPage() {
                   <button
                     onClick={handleAnalyze}
                     disabled={analyzing}
-                    className="bg-indigo-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition disabled:opacity-50"
+                    className="bg-outsail-blue-dark text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
                   >
                     {analyzing ? 'Analyzing...' : 'Generate Analysis'}
                   </button>
@@ -326,6 +365,44 @@ export default function ProjectPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-5 h-5 text-red-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-slate-900">Delete Project</h3>
+                <p className="text-sm text-slate-500">This cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-6">
+              Are you sure you want to delete <span className="font-medium">&ldquo;{project.name}&rdquo;</span>? All
+              documents, analyses, and share links will be permanently removed.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 px-4 py-2 border border-slate-300 rounded-lg text-sm text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProject}
+                disabled={deleting}
+                className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Sidebar>
   );
 }
