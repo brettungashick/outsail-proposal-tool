@@ -262,19 +262,40 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 8192,
+    max_tokens: 16384,
     messages: [{ role: 'user', content: prompt }],
   });
 
   const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
 
   let cleanText = responseText.trim();
+  // Strip markdown code fences if present
   if (cleanText.startsWith('```')) {
     cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
 
-  const result: AnalysisResult = JSON.parse(cleanText);
-  return result;
+  // Attempt to extract valid JSON if there's trailing text after the object
+  const firstBrace = cleanText.indexOf('{');
+  if (firstBrace > 0) {
+    cleanText = cleanText.slice(firstBrace);
+  }
+
+  // Find the last closing brace to handle truncation or trailing content
+  const lastBrace = cleanText.lastIndexOf('}');
+  if (lastBrace > 0 && lastBrace < cleanText.length - 1) {
+    cleanText = cleanText.slice(0, lastBrace + 1);
+  }
+
+  try {
+    const result: AnalysisResult = JSON.parse(cleanText);
+    return result;
+  } catch (parseError) {
+    console.error('Failed to parse Claude comparison response. Response length:', responseText.length, 'Stop reason:', message.stop_reason);
+    if (message.stop_reason === 'max_tokens') {
+      throw new Error('The AI response was too long and got cut off. Please try again — the analysis will regenerate.');
+    }
+    throw parseError;
+  }
 }
 
 export async function generateClarifyingQuestions(
