@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
 
   // Send invite email (non-blocking — still return the link as fallback)
   let emailSent = false;
-  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+  if (process.env.RESEND_API_KEY) {
     try {
       await sendInviteEmail(user.email, user.name, inviteUrl);
       emailSent = true;

@@ -1,22 +1,21 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+let _resend: Resend | null = null;
 
-const FROM_ADDRESS = process.env.SMTP_FROM || 'OutSail <noreply@outsail.co>';
+function getResend() {
+  if (!_resend) {
+    _resend = new Resend(process.env.RESEND_API_KEY || '');
+  }
+  return _resend;
+}
+
+const FROM_ADDRESS = process.env.EMAIL_FROM || 'OutSail <onboarding@resend.dev>';
 
 export async function sendInviteEmail(to: string, name: string, inviteUrl: string) {
-  await transporter.sendMail({
+  await getResend().emails.send({
     from: FROM_ADDRESS,
     to,
-    subject: 'You\'ve been invited to OutSail Proposal Analyzer',
+    subject: "You've been invited to OutSail Proposal Analyzer",
     html: `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
         <div style="text-align: center; margin-bottom: 24px;">
@@ -46,7 +45,7 @@ export async function sendInviteEmail(to: string, name: string, inviteUrl: strin
 }
 
 export async function sendPasswordResetEmail(to: string, name: string, resetUrl: string) {
-  await transporter.sendMail({
+  await getResend().emails.send({
     from: FROM_ADDRESS,
     to,
     subject: 'Reset your OutSail password',
