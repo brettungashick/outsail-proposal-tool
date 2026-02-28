@@ -60,8 +60,13 @@ export async function GET() {
 
     await addColumnSafe('User', 'inviteToken', 'TEXT');
     await addColumnSafe('User', 'inviteStatus', "TEXT NOT NULL DEFAULT 'active'");
+    await addColumnSafe('User', 'passwordResetToken', 'TEXT');
+    await addColumnSafe('User', 'passwordResetExpires', 'DATETIME');
     try {
       await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_inviteToken_key" ON "User"("inviteToken")`);
+    } catch { /* ignore */ }
+    try {
+      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_passwordResetToken_key" ON "User"("passwordResetToken")`);
     } catch { /* ignore */ }
 
     await addColumnSafe('Document', 'documentType', "TEXT NOT NULL DEFAULT 'initial_quote'");
@@ -129,6 +134,14 @@ export async function GET() {
       )
     `);
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vendor_name_key" ON "Vendor"("name")`);
+
+    // AppSettings table
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "AppSettings" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'app',
+        "logoUrl" TEXT
+      )
+    `);
 
     // --- Seed Users ---
     const passwordHash = await bcrypt.hash('outsail2024', 12);
