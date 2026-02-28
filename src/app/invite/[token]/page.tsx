@@ -2,7 +2,7 @@
 
 import { useRouter, useParams } from 'next/navigation';
 import { useState, useEffect } from 'react';
-import Image from 'next/image';
+import AppLogo from '@/components/AppLogo';
 
 export default function InvitePage() {
   const router = useRouter();
@@ -54,8 +54,14 @@ export default function InvitePage() {
         body: JSON.stringify({ password }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to set password');
+        let message = 'Failed to set password';
+        try {
+          const data = await res.json();
+          message = data.error || message;
+        } catch {
+          // Response wasn't JSON
+        }
+        throw new Error(message);
       }
       setSuccess(true);
     } catch (err) {
@@ -79,7 +85,7 @@ export default function InvitePage() {
         <div className="w-full max-w-md">
           <div className="bg-white rounded-2xl shadow-lg p-8 text-center">
             <div className="mx-auto mb-4 flex items-center justify-center">
-              <Image src="/outsail-logo.svg" alt="OutSail" width={180} height={46} priority />
+              <AppLogo width={180} height={46} />
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-full mx-auto mb-4 flex items-center justify-center">
               <svg className="w-6 h-6 text-green-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -106,7 +112,7 @@ export default function InvitePage() {
         <div className="bg-white rounded-2xl shadow-lg p-8">
           <div className="text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center">
-              <Image src="/outsail-logo.svg" alt="OutSail" width={180} height={46} priority />
+              <AppLogo width={180} height={46} />
             </div>
             {inviteData ? (
               <>

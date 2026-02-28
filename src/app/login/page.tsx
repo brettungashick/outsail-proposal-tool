@@ -3,8 +3,8 @@
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
+import AppLogo from '@/components/AppLogo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -38,7 +38,7 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-lg p-8">
           <div className="text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center">
-              <Image src="/outsail-logo.svg" alt="OutSail" width={180} height={46} priority />
+              <AppLogo width={180} height={46} />
             </div>
             <p className="text-slate-500 mt-2">Proposal Analysis Tool</p>
           </div>

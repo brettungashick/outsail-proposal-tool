@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import AppLogo from '@/components/AppLogo';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -22,8 +22,14 @@ export default function ForgotPasswordPage() {
         body: JSON.stringify({ email }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Something went wrong');
+        let message = 'Something went wrong';
+        try {
+          const data = await res.json();
+          message = data.error || message;
+        } catch {
+          // Response wasn't JSON
+        }
+        throw new Error(message);
       }
       setSent(true);
     } catch (err) {
@@ -39,7 +45,7 @@ export default function ForgotPasswordPage() {
         <div className="bg-white rounded-2xl shadow-lg p-8">
           <div className="text-center mb-8">
             <div className="mx-auto mb-4 flex items-center justify-center">
-              <Image src="/outsail-logo.svg" alt="OutSail" width={180} height={46} priority />
+              <AppLogo width={180} height={46} />
             </div>
           </div>
 

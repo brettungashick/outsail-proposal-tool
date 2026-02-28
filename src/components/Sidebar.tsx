@@ -2,8 +2,8 @@
 
 import { signOut, useSession } from 'next-auth/react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
+import AppLogo from '@/components/AppLogo';
 
 const navItems = [
   { href: '/dashboard', label: 'Projects', icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
@@ -34,7 +34,7 @@ export default function Sidebar({ children }: { children: React.ReactNode }) {
         {/* Logo */}
         <div className="px-5 py-5">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <Image src="/outsail-logo.svg" alt="OutSail" width={140} height={36} priority />
+            <AppLogo width={140} height={36} />
           </Link>
         </div>
 

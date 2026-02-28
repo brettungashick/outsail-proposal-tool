@@ -2,12 +2,14 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import Image from 'next/image';
 import Sidebar from '@/components/Sidebar';
 
 export default function AccountSettingsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const userRole = (session?.user as { role?: string })?.role;
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -16,9 +18,24 @@ export default function AccountSettingsPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Logo upload state (admin only)
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoError, setLogoError] = useState('');
+  const [logoSuccess, setLogoSuccess] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login');
   }, [status, router]);
+
+  // Fetch current logo
+  useEffect(() => {
+    fetch('/api/settings/logo')
+      .then((res) => res.json())
+      .then((data) => setLogoUrl(data.logoUrl))
+      .catch(() => {});
+  }, []);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +58,12 @@ export default function AccountSettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Failed to change password');
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to change password');
       setSuccess('Password updated successfully.');
       setCurrentPassword('');
@@ -51,6 +73,39 @@ export default function AccountSettingsPage() {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLogoError('');
+    setLogoSuccess('');
+    setLogoUploading(true);
+
+    const formData = new FormData();
+    formData.append('logo', file);
+
+    try {
+      const res = await fetch('/api/settings/logo', {
+        method: 'POST',
+        body: formData,
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Upload failed');
+      }
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setLogoUrl(data.logoUrl);
+      setLogoSuccess('Logo updated! Refresh the page to see it everywhere.');
+    } catch (err) {
+      setLogoError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setLogoUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -85,6 +140,58 @@ export default function AccountSettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* App Logo (Admin only) */}
+        {userRole === 'admin' && (
+          <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">App Logo</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Upload your company logo. It will appear in the sidebar, login page, and all public-facing pages.
+            </p>
+
+            {logoError && (
+              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
+                {logoError}
+                <button onClick={() => setLogoError('')} className="ml-2 text-red-500 hover:text-red-700">x</button>
+              </div>
+            )}
+            {logoSuccess && (
+              <div className="bg-green-50 text-green-700 px-4 py-3 rounded-lg text-sm mb-4">
+                {logoSuccess}
+                <button onClick={() => setLogoSuccess('')} className="ml-2 text-green-500 hover:text-green-700">x</button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-6">
+              {/* Current logo preview */}
+              <div className="w-40 h-16 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
+                {logoUrl ? (
+                  <Image src={logoUrl} alt="Current logo" width={140} height={50} style={{ objectFit: 'contain' }} />
+                ) : (
+                  <span className="text-sm text-slate-400">No logo uploaded</span>
+                )}
+              </div>
+
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/svg+xml,image/webp"
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={logoUploading}
+                  className="bg-outsail-blue-dark text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
+                >
+                  {logoUploading ? 'Uploading...' : 'Upload Logo'}
+                </button>
+                <p className="text-xs text-slate-400 mt-1">PNG, JPEG, SVG, or WebP. Max 2MB.</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Change Password */}
         <div className="bg-white rounded-xl border border-slate-200 p-6">
