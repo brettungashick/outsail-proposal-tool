@@ -8,6 +8,7 @@ import FileUpload from '@/components/FileUpload';
 import DocumentList from '@/components/DocumentList';
 import ShareManager from '@/components/ShareManager';
 import ClarifyingReview from '@/components/ClarifyingReview';
+import AnalysisLoadingOverlay from '@/components/AnalysisLoadingOverlay';
 
 interface Document {
   id: string;
@@ -169,6 +170,7 @@ export default function ProjectPage() {
 
   return (
     <Sidebar>
+      {analyzing && <AnalysisLoadingOverlay />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">

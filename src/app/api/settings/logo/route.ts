@@ -2,8 +2,6 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
 
 export async function GET() {
   try {
@@ -43,19 +41,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'File must be under 2MB' }, { status: 400 });
     }
 
+    // Convert to base64 data URL and store in database
+    // (Vercel's filesystem is read-only, so we can't write to public/)
     const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // Save to public/uploads
-    const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
-    await mkdir(uploadsDir, { recursive: true });
-
-    const ext = file.name.split('.').pop() || 'png';
-    const fileName = `app-logo.${ext}`;
-    const filePath = path.join(uploadsDir, fileName);
-    await writeFile(filePath, buffer);
-
-    const logoUrl = `/uploads/${fileName}`;
+    const base64 = Buffer.from(bytes).toString('base64');
+    const logoUrl = `data:${file.type};base64,${base64}`;
 
     await prisma.appSettings.upsert({
       where: { id: 'app' },

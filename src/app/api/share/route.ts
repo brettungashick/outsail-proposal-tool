@@ -35,7 +35,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const shareUrl = `${process.env.NEXTAUTH_URL}/share/${token}`;
+  const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const shareUrl = `${baseUrl}/share/${token}`;
 
   return NextResponse.json({ ...shareLink, shareUrl }, { status: 201 });
 }

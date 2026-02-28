@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { ClarifyingQuestion } from '@/types';
+import AnalysisLoadingOverlay from '@/components/AnalysisLoadingOverlay';
 
 interface UploadedDoc {
   id: string;
@@ -170,6 +171,7 @@ export default function ClarifyingReview({
 
   return (
     <div className="space-y-6">
+      {finalizing && <AnalysisLoadingOverlay />}
       {/* Header card */}
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6">
         <div className="flex items-start gap-3">
