@@ -10,12 +10,17 @@ interface ComparisonTableProps {
     sectionIndex: number,
     rowIndex: number,
     vendorIndex: number,
-    newValue: string
+    newDisplay: string,
+    newAmount: number | null
   ) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
   vendorColors?: Record<string, string>;
+  onAddRow?: (sectionIndex: number) => void;
+  onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
 }
+
+const TOTALS_SECTION = 'Totals';
 
 export default function ComparisonTable({
   data,
@@ -24,6 +29,8 @@ export default function ComparisonTable({
   discountToggles,
   onDiscountToggle,
   vendorColors,
+  onAddRow,
+  onDeleteRow,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, { bg: string; text: string }> = {
     'Software Fees (Recurring)': { bg: 'bg-indigo-700', text: 'text-white' },
@@ -100,6 +107,8 @@ export default function ComparisonTable({
               onCellEdit={onCellEdit}
               discountToggles={discountToggles}
               onDiscountToggle={onDiscountToggle}
+              onAddRow={onAddRow}
+              onDeleteRow={onDeleteRow}
             />
           ))}
         </tbody>
@@ -117,17 +126,22 @@ function SectionBlock({
   onCellEdit,
   discountToggles,
   onDiscountToggle,
+  onAddRow,
+  onDeleteRow,
 }: {
   section: TableSection;
   sectionIndex: number;
   vendors: string[];
   sectionStyle: { bg: string; text: string };
   isEditable: boolean;
-  onCellEdit: (si: number, ri: number, vi: number, val: string) => void;
+  onCellEdit: (si: number, ri: number, vi: number, display: string, amount: number | null) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
+  onAddRow?: (sectionIndex: number) => void;
+  onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
+  const isTotalsSection = section.name === TOTALS_SECTION;
 
   return (
     <>
@@ -136,16 +150,30 @@ function SectionBlock({
           colSpan={vendors.length + 1}
           className={`px-4 py-2.5 text-sm font-semibold ${sectionStyle.text} ${sectionStyle.bg} rounded-sm`}
         >
-          {section.name}
+          <div className="flex items-center justify-between">
+            <span>{section.name}</span>
+            {isEditable && !isTotalsSection && onAddRow && (
+              <button
+                onClick={() => onAddRow(sectionIndex)}
+                className="text-white/70 hover:text-white text-xs font-medium transition"
+                title={`Add row to ${section.name}`}
+              >
+                + Add
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
+        const isComputed = row.isSubtotal || isTotalsSection;
+        const canEditCell = isEditable && !isComputed;
+        const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
 
         return (
           <tr
             key={row.id}
-            className={`${
+            className={`group ${
               row.isSubtotal
                 ? 'bg-slate-50 font-semibold'
                 : isDiscountRow
@@ -155,7 +183,18 @@ function SectionBlock({
           >
             <td className="px-4 py-2.5 text-sm text-slate-700 border-r border-slate-100">
               <div className="flex items-center gap-2">
-                {row.label}
+                {canDelete && onDeleteRow && (
+                  <button
+                    onClick={() => onDeleteRow(sectionIndex, rowIdx)}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 flex-shrink-0 transition"
+                    title="Delete row"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+                <span className={canDelete && onDeleteRow ? '' : ''}>{row.label}</span>
                 {isDiscountSection && isDiscountRow && onDiscountToggle && (
                   <DiscountToggleButtons
                     rowId={row.id}
@@ -183,10 +222,13 @@ function SectionBlock({
                 >
                   <EditableCell
                     value={val.display}
-                    isEditable={isEditable && !row.isSubtotal}
+                    isEditable={canEditCell}
                     isConfirmed={val.isConfirmed}
+                    isComputed={isComputed}
                     note={val.note}
-                    onSave={(newVal) => onCellEdit(sectionIndex, rowIdx, vendorIdx, newVal)}
+                    onSave={(newDisplay, newAmount) =>
+                      onCellEdit(sectionIndex, rowIdx, vendorIdx, newDisplay, newAmount)
+                    }
                   />
                 </td>
               );

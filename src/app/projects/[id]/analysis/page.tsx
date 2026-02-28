@@ -2,7 +2,7 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
@@ -10,6 +10,8 @@ import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
 import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
+import { recalculateTable } from '@/lib/recalculate';
+import { generateId } from '@/lib/utils';
 
 interface AnalysisData {
   id: string;
@@ -41,6 +43,8 @@ export default function AnalysisPage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
+
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -107,6 +111,24 @@ export default function AnalysisPage() {
 
   const canEdit = isOwner || isAdmin;
 
+  // Debounced save for comparison data — avoids hammering the server on rapid edits
+  const debouncedSaveComparison = useCallback((analysisId: string, newJson: string, oldJson: string) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      setSaving(true);
+      fetch(`/api/analysis/${analysisId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fieldType: 'comparisonData',
+          fieldPath: 'comparisonData',
+          oldValue: oldJson,
+          newValue: newJson,
+        }),
+      }).finally(() => setSaving(false));
+    }, 500);
+  }, []);
+
   const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
     if (!analysis) return;
     setSaving(true);
@@ -125,63 +147,107 @@ export default function AnalysisPage() {
     sectionIndex: number,
     rowIndex: number,
     vendorIndex: number,
-    newDisplayValue: string
+    newDisplayValue: string,
+    newAmount: number | null
   ) => {
     if (!comparisonData || !analysis) return;
 
-    const updated = { ...comparisonData };
-    const section = { ...updated.sections[sectionIndex] };
-    const row = { ...section.rows[rowIndex] };
-    const val = { ...row.values[vendorIndex] };
-
-    const oldDisplay = val.display;
+    // Deep clone to avoid mutation
+    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
     val.display = newDisplayValue;
+    val.amount = newAmount;
 
-    const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
-    if (!isNaN(numVal)) {
-      val.amount = numVal;
-    }
-
-    row.values = [...row.values];
-    row.values[vendorIndex] = val;
-    section.rows = [...section.rows];
-    section.rows[rowIndex] = row;
-    updated.sections = [...updated.sections];
-    updated.sections[sectionIndex] = section;
-
-    const newJson = JSON.stringify(updated);
+    // Recalculate subtotals and totals
+    const recalculated = recalculateTable(updated, discountToggles);
+    const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
 
-    saveField(
-      'comparisonData',
-      `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}].display`,
-      oldDisplay,
-      newJson
-    );
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
   };
 
   const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
-    const updated = { ...discountToggles };
-    if (!updated[vendorName]) updated[vendorName] = {};
-    updated[vendorName][discountId] = enabled;
-    setDiscountToggles(updated);
+    const updatedToggles = { ...discountToggles };
+    if (!updatedToggles[vendorName]) updatedToggles[vendorName] = {};
+    updatedToggles[vendorName][discountId] = enabled;
+    setDiscountToggles(updatedToggles);
 
-    // Persist to server
-    if (analysis) {
-      const newVal = JSON.stringify(updated);
-      setSaving(true);
-      fetch(`/api/analysis/${analysis.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'discountToggles',
-          fieldPath: 'discountToggles',
-          oldValue: analysis.discountToggles || '{}',
-          newValue: newVal,
-        }),
-      }).finally(() => setSaving(false));
-      setAnalysis({ ...analysis, discountToggles: newVal });
-    }
+    if (!comparisonData || !analysis) return;
+
+    // Recalculate with new toggles
+    const recalculated = recalculateTable(comparisonData, updatedToggles);
+    const newCompJson = JSON.stringify(recalculated);
+    const newToggleJson = JSON.stringify(updatedToggles);
+
+    setAnalysis({
+      ...analysis,
+      comparisonData: newCompJson,
+      discountToggles: newToggleJson,
+    });
+
+    // Save both comparison data and toggle state
+    debouncedSaveComparison(analysis.id, newCompJson, analysis.comparisonData);
+    setSaving(true);
+    fetch(`/api/analysis/${analysis.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fieldType: 'discountToggles',
+        fieldPath: 'discountToggles',
+        oldValue: analysis.discountToggles || '{}',
+        newValue: newToggleJson,
+      }),
+    }).finally(() => setSaving(false));
+  };
+
+  const handleAddRow = (sectionIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const section = updated.sections[sectionIndex];
+    const isDiscountSection = section.name === 'Discounts';
+
+    // Insert before any subtotal row, or at end
+    const subtotalIdx = section.rows.findIndex((r) => r.isSubtotal);
+    const insertAt = subtotalIdx >= 0 ? subtotalIdx : section.rows.length;
+
+    const newRow = {
+      id: generateId(),
+      label: 'New Item',
+      values: updated.vendors.map(() => ({
+        amount: null,
+        display: 'To be confirmed',
+        note: null,
+        citation: null,
+        isConfirmed: false,
+      })),
+      isDiscount: isDiscountSection,
+      isSubtotal: false,
+    };
+
+    section.rows.splice(insertAt, 0, newRow);
+
+    const recalculated = recalculateTable(updated, discountToggles);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+  };
+
+  const handleDeleteRow = (sectionIndex: number, rowIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+
+    // Don't delete subtotal rows
+    if (row.isSubtotal) return;
+
+    updated.sections[sectionIndex].rows.splice(rowIndex, 1);
+
+    const recalculated = recalculateTable(updated, discountToggles);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
   };
 
   const handleUpdateStandardization = (notes: string[]) => {
@@ -225,7 +291,7 @@ export default function AnalysisPage() {
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-indigo-600 hover:text-indigo-800 text-sm"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
         </div>
       </Sidebar>
@@ -241,15 +307,15 @@ export default function AnalysisPage() {
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-sm text-indigo-600 hover:text-indigo-800 mb-2 inline-block"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
           <div className="flex justify-between items-start">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">
-                Proposal Comparison — {analysis.project.clientName}
+                Proposal Comparison &mdash; {analysis.project.clientName}
               </h1>
               <p className="text-sm text-slate-500 mt-1">
-                {analysis.project.name} · Version {analysis.version} · Generated{' '}
+                {analysis.project.name} &middot; Version {analysis.version} &middot; Generated{' '}
                 {new Date(analysis.createdAt).toLocaleDateString()}
               </p>
             </div>
@@ -330,7 +396,7 @@ export default function AnalysisPage() {
               <div className="flex justify-between items-center mb-4">
                 <h2 className="font-semibold text-slate-900">Side-by-Side Comparison</h2>
                 <p className="text-xs text-slate-400">
-                  {canEdit ? 'Click any cell to edit · ' : ''}Yellow = To be confirmed
+                  {canEdit ? 'Click any cell to edit · Totals auto-calculate · ' : ''}Yellow = To be confirmed
                 </p>
               </div>
               <ComparisonTable
@@ -339,6 +405,8 @@ export default function AnalysisPage() {
                 onCellEdit={handleCellEdit}
                 discountToggles={discountToggles}
                 onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
+                onAddRow={canEdit ? handleAddRow : undefined}
+                onDeleteRow={canEdit ? handleDeleteRow : undefined}
               />
             </div>
 

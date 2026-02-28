@@ -132,6 +132,7 @@ CRITICAL RULES:
 - NEVER hallucinate or fill in gaps that are not found in the parsed data below. If something is missing, set amount to null, display to "To be confirmed", and isConfirmed to false.
 - When a price range was given (isRange: true), use the MIDPOINT of rangeMin and rangeMax. Note this in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
+- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. The "display" field should show the annual amount with "/yr" suffix (e.g., "$18,000/yr"). Implementation fees are one-time and should NOT be annualized — display without "/yr". Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes.
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
 - Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
 
@@ -154,7 +155,7 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
             "values": [
               {
                 "amount": <number or null>,
-                "display": "<formatted $ amount or 'To be confirmed' or 'Not included' or 'Included in bundle'>",
+                "display": "<'$X,XXX/yr' for recurring fees, '$X,XXX' for one-time, or 'To be confirmed' or 'Not included' or 'Included in bundle'>",
                 "note": "<any note about this value, e.g. 'Midpoint of $5-$8 PEPM' or 'Scaled from 100 to ${targetHeadcount} employees' or null>",
                 "citation": {
                   "documentId": "<doc id>",

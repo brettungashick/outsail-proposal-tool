@@ -111,7 +111,7 @@ export default function SharePage() {
         {/* Comparison Table - Read Only */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
           <h2 className="font-semibold text-slate-900 mb-4">Side-by-Side Comparison</h2>
-          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => {}} />
+          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => { /* read-only */ }} />
         </div>
 
         {/* Notes - Read Only */}
