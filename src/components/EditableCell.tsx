@@ -1,6 +1,17 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { CellStatus, CellAudit } from '@/types';
+import CellAuditTooltip from './CellAuditTooltip';
+
+const STATUS_OPTIONS: { value: CellStatus; label: string }[] = [
+  { value: 'tbc', label: 'To be confirmed' },
+  { value: 'included', label: 'Included' },
+  { value: 'included_in_bundle', label: 'Included in bundle' },
+  { value: 'not_included', label: 'Not included' },
+  { value: 'na', label: 'N/A' },
+  { value: 'hidden', label: 'Hidden' },
+];
 
 interface EditableCellProps {
   value: string;
@@ -8,7 +19,11 @@ interface EditableCellProps {
   isConfirmed: boolean;
   isComputed?: boolean;
   note: string | null;
+  status?: CellStatus;
+  audit?: CellAudit;
   onSave: (newDisplay: string, newAmount: number | null) => void;
+  onStatusChange?: (status: CellStatus) => void;
+  onAuditClick?: () => void;
 }
 
 export default function EditableCell({
@@ -17,10 +32,16 @@ export default function EditableCell({
   isConfirmed,
   isComputed,
   note,
+  status,
+  audit,
   onSave,
+  onStatusChange,
+  onAuditClick,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -37,13 +58,11 @@ export default function EditableCell({
   const handleSave = () => {
     setEditing(false);
     if (editValue !== value) {
-      // Parse as number, stripping currency formatting
       const cleaned = editValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim();
       const parsed = parseFloat(cleaned);
       if (!isNaN(parsed)) {
         onSave(editValue, parsed);
       } else {
-        // Non-numeric (e.g., "Included", "Not included")
         onSave(editValue, null);
       }
     }
@@ -57,10 +76,34 @@ export default function EditableCell({
     }
   };
 
+  const handleStatusSelect = (newStatus: CellStatus) => {
+    setEditing(false);
+    if (onStatusChange) {
+      onStatusChange(newStatus);
+    } else {
+      // Fallback: convert status to display string
+      const displayMap: Record<CellStatus, string> = {
+        currency: value,
+        tbc: 'To be confirmed',
+        included: 'Included',
+        included_in_bundle: 'Included in bundle',
+        not_included: 'Not included',
+        na: 'N/A',
+        hidden: 'Hidden',
+      };
+      onSave(displayMap[newStatus], null);
+    }
+  };
+
+  // Determine visual state from status (with display-string fallback for old data)
   const lowerValue = value.toLowerCase().trim();
-  const isIncluded = lowerValue === 'included' || lowerValue === 'included in bundle';
-  const isNotIncluded = lowerValue === 'not included';
-  const isHidden = lowerValue === 'hidden';
+  const isIncluded = status
+    ? status === 'included' || status === 'included_in_bundle'
+    : lowerValue === 'included' || lowerValue === 'included in bundle';
+  const isNotIncluded = status
+    ? status === 'not_included' || status === 'na'
+    : lowerValue === 'not included' || lowerValue === 'n/a';
+  const isHidden = status ? status === 'hidden' : lowerValue === 'hidden';
   const isUnconfirmed = !isConfirmed && !isHidden;
   const isCurrency = /^-?\$[\d,]+/.test(value);
 
@@ -85,7 +128,7 @@ export default function EditableCell({
 
   if (editing && canEdit) {
     return (
-      <div className="px-3 py-2">
+      <div className="px-2 py-1.5">
         <input
           ref={inputRef}
           type="text"
@@ -93,8 +136,23 @@ export default function EditableCell({
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={handleSave}
           onKeyDown={handleKeyDown}
-          className="w-full px-2 py-1 border border-indigo-400 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+          placeholder="$0"
+          className="w-full px-2 py-1 border border-indigo-400 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none mb-1"
         />
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) {
+              handleStatusSelect(e.target.value as CellStatus);
+            }
+          }}
+          className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-500 bg-white cursor-pointer"
+        >
+          <option value="" disabled>Or set status...</option>
+          {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
       </div>
     );
   }
@@ -103,7 +161,7 @@ export default function EditableCell({
     <div
       className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
         canEdit ? 'cursor-pointer hover:bg-indigo-50/50' : ''
-      } ${isComputed ? 'bg-slate-50/50' : ''}`}
+      } ${isComputed ? 'bg-slate-50/50' : ''} group/cell relative`}
       onClick={() => canEdit && setEditing(true)}
       title={note || undefined}
     >
@@ -138,6 +196,27 @@ export default function EditableCell({
               </span>
             )}
           </>
+        )}
+        {audit && (audit.sources.length > 0 || audit.override || audit.formula) && onAuditClick && (
+          <span className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); onAuditClick(); }}
+              onMouseEnter={() => {
+                tooltipTimer.current = setTimeout(() => setShowTooltip(true), 200);
+              }}
+              onMouseLeave={() => {
+                if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+                setShowTooltip(false);
+              }}
+              className="opacity-0 group-hover/cell:opacity-100 ml-0.5 text-slate-400 hover:text-indigo-500 transition"
+              title=""
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+            </button>
+            {showTooltip && <CellAuditTooltip audit={audit} />}
+          </span>
         )}
       </div>
     </div>

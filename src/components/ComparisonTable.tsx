@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles, HiddenRows } from '@/types';
+import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles, HiddenRows, CellStatus } from '@/types';
 import EditableCell from './EditableCell';
 
 interface ComparisonTableProps {
@@ -22,6 +22,9 @@ interface ComparisonTableProps {
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
   onHeadcountChange?: (newHeadcount: number) => void;
+  onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
+  onCellStatusChange?: (sectionIndex: number, rowIndex: number, vendorIndex: number, newStatus: CellStatus) => void;
+  onAuditClick?: (sectionIndex: number, rowIndex: number, vendorIndex: number) => void;
 }
 
 const TOTALS_SECTION = 'Totals';
@@ -38,6 +41,9 @@ export default function ComparisonTable({
   onAddRow,
   onDeleteRow,
   onHeadcountChange,
+  onRowLabelEdit,
+  onCellStatusChange,
+  onAuditClick,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, { bg: string; text: string }> = {
     'Software Fees (Recurring)': { bg: 'bg-indigo-700', text: 'text-white' },
@@ -111,6 +117,9 @@ export default function ComparisonTable({
               onToggleHidden={onToggleHidden}
               onAddRow={onAddRow}
               onDeleteRow={onDeleteRow}
+              onRowLabelEdit={onRowLabelEdit}
+              onCellStatusChange={onCellStatusChange}
+              onAuditClick={onAuditClick}
             />
           ))}
         </tbody>
@@ -200,6 +209,9 @@ function SectionBlock({
   onToggleHidden,
   onAddRow,
   onDeleteRow,
+  onRowLabelEdit,
+  onCellStatusChange,
+  onAuditClick,
 }: {
   section: TableSection;
   sectionIndex: number;
@@ -213,6 +225,9 @@ function SectionBlock({
   onToggleHidden?: (rowId: string) => void;
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
+  onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
+  onCellStatusChange?: (si: number, ri: number, vi: number, newStatus: CellStatus) => void;
+  onAuditClick?: (si: number, ri: number, vi: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
   const isTotalsSection = section.name === TOTALS_SECTION;
@@ -291,7 +306,15 @@ function SectionBlock({
                     )}
                   </button>
                 )}
-                <span className={isRowHidden ? 'line-through' : ''}>{row.label}</span>
+                {canEditCell && onRowLabelEdit ? (
+                  <EditableRowLabel
+                    label={row.label}
+                    isHidden={isRowHidden}
+                    onSave={(newLabel) => onRowLabelEdit(sectionIndex, rowIdx, newLabel)}
+                  />
+                ) : (
+                  <span className={isRowHidden ? 'line-through' : ''}>{row.label}</span>
+                )}
                 {isDiscountSection && isDiscountRow && onDiscountToggle && (
                   <DiscountToggleButtons
                     rowId={row.id}
@@ -323,8 +346,18 @@ function SectionBlock({
                     isConfirmed={val.isConfirmed}
                     isComputed={isComputed}
                     note={val.note}
+                    status={val.status}
+                    audit={val.audit}
                     onSave={(newDisplay, newAmount) =>
                       onCellEdit(sectionIndex, rowIdx, vendorIdx, newDisplay, newAmount)
+                    }
+                    onStatusChange={onCellStatusChange
+                      ? (newStatus) => onCellStatusChange(sectionIndex, rowIdx, vendorIdx, newStatus)
+                      : undefined
+                    }
+                    onAuditClick={onAuditClick
+                      ? () => onAuditClick(sectionIndex, rowIdx, vendorIdx)
+                      : undefined
                     }
                   />
                 </td>
@@ -334,6 +367,61 @@ function SectionBlock({
         );
       })}
     </>
+  );
+}
+
+function EditableRowLabel({
+  label,
+  isHidden,
+  onSave,
+}: {
+  label: string;
+  isHidden: boolean;
+  onSave: (newLabel: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+
+  const handleSave = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== label) {
+      onSave(trimmed);
+    } else {
+      setDraft(label);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        className="px-1.5 py-0.5 text-sm border border-indigo-400 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 min-w-[120px]"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSave();
+          if (e.key === 'Escape') {
+            setDraft(label);
+            setEditing(false);
+          }
+        }}
+        autoFocus
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`cursor-pointer hover:underline hover:text-indigo-600 ${isHidden ? 'line-through' : ''}`}
+      onClick={() => {
+        setDraft(label);
+        setEditing(true);
+      }}
+      title="Click to rename"
+    >
+      {label}
+    </span>
   );
 }
 

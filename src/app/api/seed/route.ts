@@ -1,8 +1,20 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 import bcrypt from 'bcryptjs';
 
 export async function GET() {
+  // Gate behind environment variable
+  if (process.env.ALLOW_SEED !== 'true') {
+    return NextResponse.json({ error: 'Seed endpoint is disabled' }, { status: 403 });
+  }
+
+  // If there's an active session, require admin role
+  const sessionUser = await getSessionUser();
+  if (sessionUser && sessionUser.role !== 'admin') {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  }
+
   try {
     // Create tables if they don't exist
     await prisma.$executeRawUnsafe(`
@@ -144,6 +156,54 @@ export async function GET() {
       )
     `);
 
+    // LearningEvent table
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "LearningEvent" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "analysisId" TEXT NOT NULL,
+        "projectId" TEXT NOT NULL,
+        "vendorName" TEXT NOT NULL,
+        "rowId" TEXT NOT NULL,
+        "sectionName" TEXT NOT NULL,
+        "vendorIndex" INTEGER NOT NULL,
+        "editType" TEXT NOT NULL,
+        "oldDisplay" TEXT NOT NULL,
+        "oldAmount" REAL,
+        "oldStatus" TEXT,
+        "newDisplay" TEXT NOT NULL,
+        "newAmount" REAL,
+        "newStatus" TEXT,
+        "rowLabel" TEXT NOT NULL,
+        "reasonTag" TEXT,
+        "promotedToRuleId" TEXT,
+        "userId" TEXT NOT NULL,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT "LearningEvent_analysisId_fkey" FOREIGN KEY ("analysisId") REFERENCES "Analysis" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+      )
+    `);
+
+    // VendorPlaybookRule table
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "VendorPlaybookRule" (
+        "id" TEXT NOT NULL PRIMARY KEY,
+        "vendorName" TEXT NOT NULL,
+        "name" TEXT NOT NULL,
+        "conditionType" TEXT NOT NULL,
+        "conditionValue" TEXT NOT NULL,
+        "conditionField" TEXT NOT NULL,
+        "actionType" TEXT NOT NULL,
+        "actionValue" TEXT NOT NULL,
+        "examples" TEXT,
+        "confidence" TEXT NOT NULL DEFAULT 'sure',
+        "enabled" INTEGER NOT NULL DEFAULT 1,
+        "version" INTEGER NOT NULL DEFAULT 1,
+        "createdBy" TEXT NOT NULL,
+        "createdFromEventId" TEXT,
+        "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     // --- Seed Users ---
     const passwordHash = await bcrypt.hash('outsail2024', 12);
 
@@ -160,9 +220,10 @@ export async function GET() {
       if (existing) {
         // Update role if needed (e.g., promote brett to admin)
         if (existing.role !== u.role) {
-          await prisma.$executeRawUnsafe(
-            `UPDATE "User" SET "role" = '${u.role}' WHERE "email" = '${u.email}'`
-          );
+          await prisma.user.update({
+            where: { email: u.email },
+            data: { role: u.role },
+          });
           createdUsers.push(`${u.email} (role updated to ${u.role})`);
         } else {
           createdUsers.push(`${u.email} (already exists)`);
@@ -202,9 +263,11 @@ export async function GET() {
     let vendorsSeeded = 0;
     for (const v of defaultVendors) {
       try {
-        await prisma.$executeRawUnsafe(
-          `INSERT OR IGNORE INTO "Vendor" ("id", "name", "accentColor", "createdAt", "updatedAt") VALUES (lower(hex(randomblob(12))), '${v.name}', '${v.accentColor}', datetime('now'), datetime('now'))`
-        );
+        await prisma.vendor.upsert({
+          where: { name: v.name },
+          update: {},
+          create: { name: v.name, accentColor: v.accentColor },
+        });
         vendorsSeeded++;
       } catch {
         // Already exists

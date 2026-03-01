@@ -1,5 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ParsedProposal, AnalysisResult, ClarifyingQuestion } from '@/types';
+import { ParsedProposal, AnalysisResult, ClarifyingQuestion, ComparisonTable } from '@/types';
+import { augmentAuditData, buildInitialAuditLog } from '@/lib/audit';
+
+function slugify(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+/** Assign stable IDs to sections that don't have one yet. */
+function assignSectionIds(table: ComparisonTable): void {
+  for (const section of table.sections) {
+    if (!section.id) {
+      section.id = slugify(section.name);
+    }
+  }
+}
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -308,6 +322,12 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
 
   try {
     const result: AnalysisResult = JSON.parse(cleanText);
+
+    // Post-process: assign stable section IDs and augment cells with audit source pointers
+    assignSectionIds(result.comparisonTable);
+    augmentAuditData(result.comparisonTable, parsedProposals);
+    result.comparisonTable.auditLog = buildInitialAuditLog(result.comparisonTable);
+
     return result;
   } catch (parseError) {
     console.error('Failed to parse Claude comparison response. Response length:', responseText.length, 'Stop reason:', message.stop_reason);

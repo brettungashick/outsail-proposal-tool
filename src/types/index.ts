@@ -1,9 +1,44 @@
+export type CellStatus = 'currency' | 'included' | 'included_in_bundle' | 'not_included' | 'tbc' | 'na' | 'hidden';
+
+export interface SourcePointer {
+  documentId: string;
+  documentName: string;
+  vendorName: string;
+  label: string;
+  charOffsetStart: number; // -1 if not located
+  charOffsetEnd: number;   // -1 if not located
+}
+
+export interface OverrideMetadata {
+  overriddenBy: string;
+  overriddenAt: string;
+  priorDisplay: string;
+  priorAmount: number | null;
+}
+
+export interface CellAudit {
+  sources: SourcePointer[];
+  override: OverrideMetadata | null;
+  formula: string | null;
+}
+
+export interface CellAuditEvent {
+  type: 'extraction_set_cell' | 'user_override_cell';
+  timestamp: string;
+  cellPath: string;
+  userId: string | null;
+  display: string;
+  amount: number | null;
+}
+
 export interface VendorValue {
   amount: number | null;
   display: string;
   note: string | null;
   citation: Citation | null;
   isConfirmed: boolean;
+  status?: CellStatus;
+  audit?: CellAudit;
 }
 
 export interface TableRow {
@@ -15,6 +50,7 @@ export interface TableRow {
 }
 
 export interface TableSection {
+  id?: string; // Stable section ID (optional for backward compat)
   name: string;
   rows: TableRow[];
 }
@@ -23,6 +59,7 @@ export interface ComparisonTable {
   vendors: string[];
   normalizedHeadcount: number;
   sections: TableSection[];
+  auditLog?: CellAuditEvent[];
 }
 
 export interface Citation {

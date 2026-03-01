@@ -7,9 +7,20 @@ const SERVICE_SECTION = 'Service Fees (Recurring)';
 const DISCOUNT_SECTION = 'Discounts';
 const TOTALS_SECTION = 'Totals';
 
-/** Check if a display value represents a zero-contribution cell (not a "To be confirmed"). */
-function isZeroContribution(display: string): boolean {
-  const d = display.toLowerCase().trim();
+interface SumResult {
+  sum: number;
+  hasTbc: boolean;
+  tbcCount: number;
+}
+
+const ZERO_SUM: SumResult = { sum: 0, hasTbc: false, tbcCount: 0 };
+
+/** Check if a VendorValue represents a zero-contribution cell (not a "To be confirmed"). */
+function isZeroContribution(val: VendorValue): boolean {
+  if (val.status) {
+    return ['not_included', 'na', 'included', 'included_in_bundle', 'hidden'].includes(val.status);
+  }
+  const d = val.display.toLowerCase().trim();
   return (
     d === 'not included' ||
     d === 'n/a' ||
@@ -23,33 +34,31 @@ function isZeroContribution(display: string): boolean {
 
 /**
  * Sum the amounts of non-subtotal, non-hidden data rows in a section for a given vendor index.
- * Returns null if any contributing row has a null amount (meaning "To be confirmed").
+ * Always returns a numeric sum. Tracks how many rows are unconfirmed (TBC).
  */
 function sumDataRows(
   section: TableSection | undefined,
   vendorIndex: number,
   hiddenRows: HiddenRows
-): number | null {
-  if (!section) return 0;
+): SumResult {
+  if (!section) return ZERO_SUM;
   let sum = 0;
-  let hasNull = false;
+  let tbcCount = 0;
 
   for (const row of section.rows) {
     if (row.isSubtotal) continue;
-    if (hiddenRows[row.id]) continue; // Skip hidden rows
+    if (hiddenRows[row.id]) continue;
     const val = row.values[vendorIndex];
     if (!val) continue;
 
     if (val.amount !== null) {
       sum += val.amount;
-    } else {
-      if (!isZeroContribution(val.display)) {
-        hasNull = true;
-      }
+    } else if (!isZeroContribution(val)) {
+      tbcCount++;
     }
   }
 
-  return hasNull ? null : sum;
+  return { sum, hasTbc: tbcCount > 0, tbcCount };
 }
 
 /**
@@ -62,15 +71,13 @@ function sumDiscounts(
   vendorIndex: number,
   vendorName: string,
   discountToggles: DiscountToggles
-): number | null {
-  if (!discountSection) return 0;
+): SumResult {
+  if (!discountSection) return ZERO_SUM;
   let sum = 0;
-  let hasNull = false;
+  let tbcCount = 0;
 
   for (const row of discountSection.rows) {
     if (!row.isDiscount) continue;
-
-    // Check if toggled off
     if (discountToggles[vendorName]?.[row.id] === false) continue;
 
     const val = row.values[vendorIndex];
@@ -82,25 +89,36 @@ function sumDiscounts(
     if (val.amount !== null) {
       sum += val.amount;
     } else {
-      hasNull = true;
+      tbcCount++;
     }
   }
 
-  return hasNull ? null : sum;
+  return { sum, hasTbc: tbcCount > 0, tbcCount };
 }
 
-function makeValue(amount: number | null, existing: VendorValue): VendorValue {
+/** Combine multiple SumResults by adding sums and tbcCounts. */
+function addResults(...results: SumResult[]): SumResult {
+  let sum = 0;
+  let tbcCount = 0;
+  for (const r of results) {
+    sum += r.sum;
+    tbcCount += r.tbcCount;
+  }
+  return { sum, hasTbc: tbcCount > 0, tbcCount };
+}
+
+function makeValue(amount: number, hasTbc: boolean, tbcCount: number, existing: VendorValue, formula?: string): VendorValue {
   return {
     ...existing,
     amount,
-    display: amount !== null ? formatCurrency(amount) : 'To be confirmed',
-    isConfirmed: amount !== null,
+    display: formatCurrency(amount),
+    isConfirmed: !hasTbc,
+    note: hasTbc ? `${tbcCount} item(s) still unconfirmed` : existing.note,
+    audit: {
+      ...(existing.audit || { sources: [], override: null, formula: null }),
+      formula: formula ?? existing.audit?.formula ?? null,
+    },
   };
-}
-
-function safeAdd(...values: (number | null)[]): number | null {
-  if (values.some((v) => v === null)) return null;
-  return values.reduce((a, b) => (a as number) + (b as number), 0) as number;
 }
 
 /**
@@ -114,7 +132,7 @@ export function recalculateTable(
   discountToggles: DiscountToggles,
   hiddenRows: HiddenRows = {}
 ): ComparisonTable {
-  const result: ComparisonTable = JSON.parse(JSON.stringify(data));
+  const result: ComparisonTable = structuredClone(data);
   const vendorCount = result.vendors.length;
 
   const findSection = (name: string) =>
@@ -126,9 +144,14 @@ export function recalculateTable(
 
     for (const row of section.rows) {
       if (!row.isSubtotal) continue;
+      // Build formula from contributing row IDs
+      const contributingIds = section.rows
+        .filter(r => !r.isSubtotal && !hiddenRows[r.id])
+        .map(r => r.id);
+      const formula = `SUM(${contributingIds.join(', ')})`;
       for (let vi = 0; vi < vendorCount; vi++) {
-        const total = sumDataRows(section, vi, hiddenRows);
-        row.values[vi] = makeValue(total, row.values[vi]);
+        const r = sumDataRows(section, vi, hiddenRows);
+        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
       }
     }
   }
@@ -142,51 +165,52 @@ export function recalculateTable(
 
   if (!totalsSection) return result;
 
-  // Helper: get the subtotal for a fee section (use the subtotal row if exists, otherwise sum data rows)
-  function getSectionTotal(section: TableSection | undefined, vi: number): number | null {
-    if (!section) return 0;
+  // Helper: get the SumResult for a fee section (use the subtotal row if exists, otherwise sum data rows)
+  function getSectionResult(section: TableSection | undefined, vi: number): SumResult {
+    if (!section) return ZERO_SUM;
     const subtotalRow = section.rows.find((r) => r.isSubtotal);
-    if (subtotalRow) return subtotalRow.values[vi]?.amount ?? null;
+    if (subtotalRow) {
+      const val = subtotalRow.values[vi];
+      return {
+        sum: val?.amount ?? 0,
+        hasTbc: val ? !val.isConfirmed : false,
+        tbcCount: val && !val.isConfirmed ? 1 : 0,
+      };
+    }
     return sumDataRows(section, vi, hiddenRows);
   }
 
   for (let vi = 0; vi < vendorCount; vi++) {
     const vendorName = result.vendors[vi];
-    const softwareTotal = getSectionTotal(softwareSection, vi);
-    const implTotal = sumDataRows(implSection, vi, hiddenRows);
-    const serviceTotal = sumDataRows(serviceSection, vi, hiddenRows);
-    const discountTotal = sumDiscounts(discountSection, vi, vendorName, discountToggles);
+    const softwareResult = getSectionResult(softwareSection, vi);
+    const implResult = sumDataRows(implSection, vi, hiddenRows);
+    const serviceResult = sumDataRows(serviceSection, vi, hiddenRows);
+    const discountResult = sumDiscounts(discountSection, vi, vendorName, discountToggles);
 
-    const y1Before = safeAdd(softwareTotal ?? 0, implTotal ?? 0, serviceTotal ?? 0);
-    // If any fee section has nulls, propagate
-    const y1BeforeActual =
-      softwareTotal === null || implTotal === null || serviceTotal === null
-        ? null
-        : y1Before;
-
-    const y1 = safeAdd(y1BeforeActual, discountTotal);
+    const y1BeforeResult = addResults(softwareResult, implResult, serviceResult);
+    const y1Result = addResults(y1BeforeResult, discountResult);
 
     // Year 2 = Software + Service + recurring discounts (no implementation)
-    const y2Before = safeAdd(softwareTotal, serviceTotal);
-    const y2 = safeAdd(y2Before, discountTotal);
+    const y2Result = addResults(softwareResult, serviceResult, discountResult);
 
     // Year 3 = same as Year 2
-    const y3 = y2;
+    const y3Result = y2Result;
 
-    const total3yr = safeAdd(y1, y2, y3);
+    const total3yrResult = addResults(y1Result, y2Result, y3Result);
 
-    const totalsMap: Record<string, number | null> = {
-      year1_before_discounts: y1BeforeActual,
-      year1_discounts: discountTotal,
-      year1: y1,
-      year2: y2,
-      year3: y3,
-      total3yr: total3yr,
+    const totalsMap: Record<string, { result: SumResult; formula: string }> = {
+      year1_before_discounts: { result: y1BeforeResult, formula: 'software_subtotal + impl_total + service_total' },
+      year1_discounts: { result: discountResult, formula: 'SUM(enabled_discounts)' },
+      year1: { result: y1Result, formula: 'year1_before_discounts + year1_discounts' },
+      year2: { result: y2Result, formula: 'software_subtotal + service_total + year1_discounts' },
+      year3: { result: y3Result, formula: 'software_subtotal + service_total + year1_discounts' },
+      total3yr: { result: total3yrResult, formula: 'year1 + year2 + year3' },
     };
 
     for (const row of totalsSection.rows) {
       if (row.id in totalsMap) {
-        row.values[vi] = makeValue(totalsMap[row.id], row.values[vi]);
+        const { result: r, formula } = totalsMap[row.id];
+        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
       }
     }
   }

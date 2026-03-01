@@ -1,14 +1,18 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 import { generateExcelBuffer } from '@/lib/export-excel';
 import { generatePdfBuffer } from '@/lib/export-pdf';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const hasAccess = await requireAnalysisAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
   const format = req.nextUrl.searchParams.get('format') || 'excel';

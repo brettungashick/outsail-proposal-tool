@@ -54,11 +54,11 @@ model Document {
 }
 
 model Analysis {
-  id                   String         @id @default(cuid())
+  id                   String           @id @default(cuid())
   projectId            String
-  project              Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  version              Int            @default(1)
-  status               String         @default("complete") // draft | clarifying | complete
+  project              Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version              Int              @default(1)
+  status               String           @default("complete") // draft | clarifying | complete
   comparisonData       String
   standardizationNotes String?
   vendorNotes          String?
@@ -66,12 +66,13 @@ model Analysis {
   citations            String?
   discountToggles      String?
   hiddenRows           String?
-  parsedProposals      String?        // JSON: stored parsed proposals for finalization
-  clarifyingQuestions  String?        // JSON: AI-generated questions
-  advisorAnswers       String?        // JSON: advisor responses to questions
+  parsedProposals      String?          // JSON: stored parsed proposals for finalization
+  clarifyingQuestions  String?          // JSON: AI-generated questions
+  advisorAnswers       String?          // JSON: advisor responses to questions
   createdBy            String
-  createdAt            DateTime       @default(now())
+  createdAt            DateTime         @default(now())
   edits                AnalysisEdit[]
+  learningEvents       LearningEvent[]
 }
 
 model AnalysisEdit {
@@ -107,4 +108,46 @@ model Vendor {
 model AppSettings {
   id       String  @id @default("app")
   logoUrl  String?
+}
+
+model LearningEvent {
+  id               String   @id @default(cuid())
+  analysisId       String
+  analysis         Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  projectId        String
+  vendorName       String
+  rowId            String
+  sectionName      String
+  vendorIndex      Int
+  editType         String   // value_change | status_change | label_change
+  oldDisplay       String
+  oldAmount        Float?
+  oldStatus        String?
+  newDisplay       String
+  newAmount        Float?
+  newStatus        String?
+  rowLabel         String
+  reasonTag        String?  // misclassified | wrong_unit | discount | bundled | other
+  promotedToRuleId String?
+  userId           String
+  createdAt        DateTime @default(now())
+}
+
+model VendorPlaybookRule {
+  id                 String   @id @default(cuid())
+  vendorName         String   // Vendor.name or "*" for global
+  name               String
+  conditionType      String   // contains | regex
+  conditionValue     String
+  conditionField     String   // label | section | display
+  actionType         String   // set_status | add_note (v1)
+  actionValue        String   // JSON string
+  examples           String?  // JSON array
+  confidence         String   @default("sure") // sure | maybe
+  enabled            Boolean  @default(true)
+  version            Int      @default(1)
+  createdBy          String
+  createdFromEventId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }

@@ -9,7 +9,8 @@ import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
-import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows } from '@/types';
+import AuditDrawer from '@/components/AuditDrawer';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus } from '@/types';
 import { recalculateTable } from '@/lib/recalculate';
 import { generateId, formatCurrency } from '@/lib/utils';
 
@@ -30,7 +31,7 @@ interface AnalysisData {
 type AnalysisTab = 'summary' | 'vendor-detail';
 
 export default function AnalysisPage() {
-  const { status: authStatus } = useSession();
+  const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const params = useParams();
   const projectId = params.id as string;
@@ -45,6 +46,7 @@ export default function AnalysisPage() {
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
   const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [auditDrawer, setAuditDrawer] = useState<{ si: number; ri: number; vi: number } | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -153,6 +155,84 @@ export default function AnalysisPage() {
     }
   };
 
+  const deriveStatusFromDisplay = (display: string): CellStatus => {
+    const d = display.toLowerCase().trim();
+    if (d === 'included') return 'included';
+    if (d === 'included in bundle') return 'included_in_bundle';
+    if (d === 'not included') return 'not_included';
+    if (d === 'n/a') return 'na';
+    if (d === 'hidden') return 'hidden';
+    if (d === 'to be confirmed') return 'tbc';
+    return 'currency';
+  };
+
+  const STATUS_DISPLAY_MAP: Record<CellStatus, string> = {
+    currency: '',
+    tbc: 'To be confirmed',
+    included: 'Included',
+    included_in_bundle: 'Included in bundle',
+    not_included: 'Not included',
+    na: 'N/A',
+    hidden: 'Hidden',
+  };
+
+  const userId = (session?.user as { id: string } | undefined)?.id;
+
+  // Fire-and-forget learning event emission — never blocks the UI
+  const emitLearningEvent = useCallback((event: {
+    analysisId: string;
+    projectId: string;
+    vendorName: string;
+    rowId: string;
+    sectionName: string;
+    vendorIndex: number;
+    editType: 'value_change' | 'status_change' | 'label_change';
+    oldDisplay: string;
+    oldAmount: number | null;
+    oldStatus?: string;
+    newDisplay: string;
+    newAmount: number | null;
+    newStatus?: string;
+    rowLabel: string;
+  }) => {
+    fetch('/api/learning-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(event),
+    }).catch(() => {}); // Silently ignore failures
+  }, []);
+
+  const applyOverride = (
+    val: ComparisonTableType['sections'][0]['rows'][0]['values'][0],
+    updated: ComparisonTableType,
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number,
+    newDisplay: string,
+    newAmount: number | null
+  ) => {
+    const priorDisplay = val.display;
+    const priorAmount = val.amount;
+
+    if (!val.audit) val.audit = { sources: [], override: null, formula: null };
+    val.audit.override = {
+      overriddenBy: userId || 'unknown',
+      overriddenAt: new Date().toISOString(),
+      priorDisplay,
+      priorAmount,
+    };
+
+    if (!updated.auditLog) updated.auditLog = [];
+    updated.auditLog.push({
+      type: 'user_override_cell',
+      timestamp: new Date().toISOString(),
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`,
+      userId: userId || null,
+      display: newDisplay,
+      amount: newAmount,
+    });
+  };
+
   const handleCellEdit = (
     sectionIndex: number,
     rowIndex: number,
@@ -162,18 +242,95 @@ export default function AnalysisPage() {
   ) => {
     if (!comparisonData || !analysis) return;
 
-    // Deep clone to avoid mutation
-    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
-    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+    const updated: ComparisonTableType = structuredClone(comparisonData);
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
+
+    // Capture prior state for learning event
+    const oldDisplay = val.display;
+    const oldAmount = val.amount;
+    const oldStatus = val.status;
+
+    applyOverride(val, updated, sectionIndex, rowIndex, vendorIndex, newDisplayValue, newAmount);
+
     val.display = newDisplayValue;
     val.amount = newAmount;
+    val.status = newAmount !== null ? 'currency' : deriveStatusFromDisplay(newDisplayValue);
+    val.isConfirmed = val.status !== 'tbc';
 
-    // Recalculate subtotals and totals
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
 
     debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+
+    // Emit learning event
+    emitLearningEvent({
+      analysisId: analysis.id,
+      projectId,
+      vendorName: comparisonData.vendors[vendorIndex] || '',
+      rowId: row.id,
+      sectionName: comparisonData.sections[sectionIndex].name,
+      vendorIndex,
+      editType: 'value_change',
+      oldDisplay,
+      oldAmount,
+      oldStatus,
+      newDisplay: newDisplayValue,
+      newAmount,
+      newStatus: val.status,
+      rowLabel: row.label,
+    });
+  };
+
+  const handleCellStatusChange = (
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number,
+    newStatus: CellStatus
+  ) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated: ComparisonTableType = structuredClone(comparisonData);
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
+    const newDisplay = STATUS_DISPLAY_MAP[newStatus];
+
+    // Capture prior state for learning event
+    const oldDisplay = val.display;
+    const oldAmount = val.amount;
+    const oldStatus = val.status;
+
+    applyOverride(val, updated, sectionIndex, rowIndex, vendorIndex, newDisplay, null);
+
+    val.status = newStatus;
+    val.display = newDisplay;
+    val.amount = null;
+    val.isConfirmed = newStatus !== 'tbc';
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+
+    // Emit learning event
+    emitLearningEvent({
+      analysisId: analysis.id,
+      projectId,
+      vendorName: comparisonData.vendors[vendorIndex] || '',
+      rowId: row.id,
+      sectionName: comparisonData.sections[sectionIndex].name,
+      vendorIndex,
+      editType: 'status_change',
+      oldDisplay,
+      oldAmount,
+      oldStatus,
+      newDisplay,
+      newAmount: null,
+      newStatus: newStatus,
+      rowLabel: row.label,
+    });
   };
 
   const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
@@ -213,7 +370,7 @@ export default function AnalysisPage() {
   const handleAddRow = (sectionIndex: number) => {
     if (!comparisonData || !analysis) return;
 
-    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const updated: ComparisonTableType = structuredClone(comparisonData);
     const section = updated.sections[sectionIndex];
     const isDiscountSection = section.name === 'Discounts';
 
@@ -246,7 +403,7 @@ export default function AnalysisPage() {
   const handleDeleteRow = (sectionIndex: number, rowIndex: number) => {
     if (!comparisonData || !analysis) return;
 
-    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const updated: ComparisonTableType = structuredClone(comparisonData);
     const row = updated.sections[sectionIndex].rows[rowIndex];
 
     // Don't delete subtotal rows
@@ -258,6 +415,39 @@ export default function AnalysisPage() {
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
     debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+  };
+
+  const handleRowLabelEdit = (sectionIndex: number, rowIndex: number, newLabel: string) => {
+    if (!comparisonData || !analysis) return;
+    const trimmed = newLabel.trim();
+    if (!trimmed) return;
+
+    const row = comparisonData.sections[sectionIndex].rows[rowIndex];
+    const oldLabel = row.label;
+
+    const updated: ComparisonTableType = structuredClone(comparisonData);
+    updated.sections[sectionIndex].rows[rowIndex].label = trimmed;
+    const newJson = JSON.stringify(updated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+
+    // Emit learning event (use vendorIndex 0 — label edits apply to the row, not a specific vendor)
+    if (oldLabel !== trimmed) {
+      emitLearningEvent({
+        analysisId: analysis.id,
+        projectId,
+        vendorName: '',
+        rowId: row.id,
+        sectionName: comparisonData.sections[sectionIndex].name,
+        vendorIndex: 0,
+        editType: 'label_change',
+        oldDisplay: oldLabel,
+        oldAmount: null,
+        newDisplay: trimmed,
+        newAmount: null,
+        rowLabel: trimmed,
+      });
+    }
   };
 
   const handleToggleHidden = (rowId: string) => {
@@ -301,7 +491,7 @@ export default function AnalysisPage() {
     if (!oldHeadcount || oldHeadcount === newHeadcount) return;
 
     const ratio = newHeadcount / oldHeadcount;
-    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    const updated: ComparisonTableType = structuredClone(comparisonData);
     updated.normalizedHeadcount = newHeadcount;
 
     // Scale recurring fee sections (Software, Service) — these are PEPM-based annualized values
@@ -485,6 +675,9 @@ export default function AnalysisPage() {
                 onAddRow={canEdit ? handleAddRow : undefined}
                 onDeleteRow={canEdit ? handleDeleteRow : undefined}
                 onHeadcountChange={canEdit ? handleHeadcountChange : undefined}
+                onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
+                onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
+                onAuditClick={(si, ri, vi) => setAuditDrawer({ si, ri, vi })}
               />
             </div>
 
@@ -527,6 +720,21 @@ export default function AnalysisPage() {
           fetchAnalysis(versionId);
         }}
       />
+
+      {/* Audit Drawer */}
+      {auditDrawer && comparisonData && (
+        <AuditDrawer
+          isOpen={true}
+          onClose={() => setAuditDrawer(null)}
+          cellPath={`sections[${auditDrawer.si}].rows[${auditDrawer.ri}].values[${auditDrawer.vi}]`}
+          vendorValue={comparisonData.sections[auditDrawer.si].rows[auditDrawer.ri].values[auditDrawer.vi]}
+          auditLog={comparisonData.auditLog || []}
+          onRevert={canEdit ? (priorDisplay, priorAmount) => {
+            handleCellEdit(auditDrawer.si, auditDrawer.ri, auditDrawer.vi, priorDisplay, priorAmount);
+            setAuditDrawer(null);
+          } : undefined}
+        />
+      )}
     </Sidebar>
   );
 }
