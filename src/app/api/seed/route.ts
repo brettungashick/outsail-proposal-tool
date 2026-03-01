@@ -91,6 +91,7 @@ export async function GET() {
     `);
 
     await addColumnSafe('Analysis', 'discountToggles', 'TEXT');
+    await addColumnSafe('Analysis', 'hiddenRows', 'TEXT');
     await addColumnSafe('Analysis', 'status', "TEXT NOT NULL DEFAULT 'complete'");
     await addColumnSafe('Analysis', 'parsedProposals', 'TEXT');
     await addColumnSafe('Analysis', 'clarifyingQuestions', 'TEXT');
