@@ -132,7 +132,7 @@ CRITICAL RULES:
 - NEVER hallucinate or fill in gaps that are not found in the parsed data below. If something is missing, set amount to null, display to "To be confirmed", and isConfirmed to false.
 - When a price range was given (isRange: true), use the MIDPOINT of rangeMin and rangeMax. Note this in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
-- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. The "display" field should show the annual amount with "/yr" suffix (e.g., "$18,000/yr"). Implementation fees are one-time and should NOT be annualized — display without "/yr". Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes.
+- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. Implementation fees are one-time and should NOT be annualized. Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes.
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
 - Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
 
@@ -155,7 +155,7 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
             "values": [
               {
                 "amount": <number or null>,
-                "display": "<'$X,XXX/yr' for recurring fees, '$X,XXX' for one-time, or 'To be confirmed' or 'Not included' or 'Included in bundle'>",
+                "display": "<MUST be one of exactly 5 states: '$X,XXX' (dollar amount only, no /yr suffix), 'Included in bundle' (module included but priced elsewhere), 'Not included' (definitely not in this vendor's offering), 'To be confirmed' (unclear if included — note this in vendorNotes), or 'Hidden' (included in bundle or priced specifically but removed for standardization)>",
                 "note": "<any note about this value, e.g. 'Midpoint of $5-$8 PEPM' or 'Scaled from 100 to ${targetHeadcount} employees' or null>",
                 "citation": {
                   "documentId": "<doc id>",
@@ -187,7 +187,7 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
             "values": [
               {
                 "amount": <negative number representing the discount, or null if vendor has no such discount>,
-                "display": "<formatted negative $ amount like '-$1,200/yr' or 'N/A'>",
+                "display": "<formatted negative $ amount like '-$1,200' or 'N/A'>",
                 "note": "<e.g. '10% first-year discount' or null>",
                 "citation": <citation object or null>,
                 "isConfirmed": <boolean>
@@ -240,9 +240,29 @@ CONSENSUS MODULE CATEGORIES (map vendor modules to these):
 - Performance Management (include only if at least one vendor has it)
 - Compensation Management (include only if at least one vendor has it)
 
-For Software Fees, add a "Software Subtotal" row at the end.
-For Implementation Fees rows, consider: Total Implementation, GL Integration, Carrier Feeds, 401k Integration, Historical Data Conversion, Project Manager, Training.
-For Service Fees rows, consider: Tax Filing, COBRA Admin, HSA/FSA Admin, Integration Maintenance.
+For Software Fees, add a "Software Subtotal" row at the end (isSubtotal: true).
+
+For Implementation Fees, break out into as much detail as possible. Common implementation line items include:
+- Total Implementation / Base Implementation Fee
+- General Ledger (GL) Integration
+- Carrier Feeds / Benefits Carrier Connections
+- 401(k) Integration
+- Additional Integrations (specify which if known)
+- Historical Data Conversion / Data Migration
+- Project Management
+- Training / Administrator Training
+- Open Enrollment Support
+Do NOT lump everything into a single "Total Implementation" row if the vendor provides line-item detail. Use "Not included" for items a vendor doesn't offer, "To be confirmed" for unclear items.
+
+For Service Fees, break out into detail. Common recurring service fees include:
+- End-of-Year Tax Filing / W-2 Processing
+- COBRA Administration
+- HSA/FSA Administration
+- Managed Services / HR Outsourcing (if applicable)
+- Integration Maintenance / Ongoing Support Fees
+- ACA Compliance / Reporting
+These vary widely — some vendors bundle tax filing into payroll, others charge separately. Use "Included in bundle" when it's part of another fee. Only include rows where at least one vendor has data.
+
 Only include rows where at least one vendor has data.
 
 For Discounts section:

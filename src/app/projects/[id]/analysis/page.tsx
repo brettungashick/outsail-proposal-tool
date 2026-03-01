@@ -9,9 +9,9 @@ import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
-import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows } from '@/types';
 import { recalculateTable } from '@/lib/recalculate';
-import { generateId } from '@/lib/utils';
+import { generateId, formatCurrency } from '@/lib/utils';
 
 interface AnalysisData {
   id: string;
@@ -22,6 +22,7 @@ interface AnalysisData {
   nextSteps: string;
   citations: string;
   discountToggles: string | null;
+  hiddenRows: string | null;
   createdAt: string;
   project: { name: string; clientName: string; isOwner?: boolean; isAdmin?: boolean };
 }
@@ -42,6 +43,7 @@ export default function AnalysisPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
+  const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +89,14 @@ export default function AnalysisPage() {
           setDiscountToggles(JSON.parse(data.discountToggles));
         } catch {
           setDiscountToggles({});
+        }
+      }
+      // Load hidden rows
+      if (data.hiddenRows) {
+        try {
+          setHiddenRows(JSON.parse(data.hiddenRows));
+        } catch {
+          setHiddenRows({});
         }
       }
     }
@@ -159,7 +169,7 @@ export default function AnalysisPage() {
     val.amount = newAmount;
 
     // Recalculate subtotals and totals
-    const recalculated = recalculateTable(updated, discountToggles);
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
 
@@ -175,7 +185,7 @@ export default function AnalysisPage() {
     if (!comparisonData || !analysis) return;
 
     // Recalculate with new toggles
-    const recalculated = recalculateTable(comparisonData, updatedToggles);
+    const recalculated = recalculateTable(comparisonData, updatedToggles, hiddenRows);
     const newCompJson = JSON.stringify(recalculated);
     const newToggleJson = JSON.stringify(updatedToggles);
 
@@ -227,7 +237,7 @@ export default function AnalysisPage() {
 
     section.rows.splice(insertAt, 0, newRow);
 
-    const recalculated = recalculateTable(updated, discountToggles);
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
     debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
@@ -244,7 +254,72 @@ export default function AnalysisPage() {
 
     updated.sections[sectionIndex].rows.splice(rowIndex, 1);
 
-    const recalculated = recalculateTable(updated, discountToggles);
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+  };
+
+  const handleToggleHidden = (rowId: string) => {
+    if (!comparisonData || !analysis) return;
+
+    const updatedHidden = { ...hiddenRows };
+    updatedHidden[rowId] = !updatedHidden[rowId];
+    if (!updatedHidden[rowId]) delete updatedHidden[rowId];
+    setHiddenRows(updatedHidden);
+
+    // Recalculate with updated hidden state
+    const recalculated = recalculateTable(comparisonData, discountToggles, updatedHidden);
+    const newCompJson = JSON.stringify(recalculated);
+    const newHiddenJson = JSON.stringify(updatedHidden);
+
+    setAnalysis({
+      ...analysis,
+      comparisonData: newCompJson,
+      hiddenRows: newHiddenJson,
+    });
+
+    debouncedSaveComparison(analysis.id, newCompJson, analysis.comparisonData);
+    // Save hidden rows state
+    setSaving(true);
+    fetch(`/api/analysis/${analysis.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fieldType: 'hiddenRows',
+        fieldPath: 'hiddenRows',
+        oldValue: analysis.hiddenRows || '{}',
+        newValue: newHiddenJson,
+      }),
+    }).finally(() => setSaving(false));
+  };
+
+  const handleHeadcountChange = (newHeadcount: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const oldHeadcount = comparisonData.normalizedHeadcount;
+    if (!oldHeadcount || oldHeadcount === newHeadcount) return;
+
+    const ratio = newHeadcount / oldHeadcount;
+    const updated: ComparisonTableType = JSON.parse(JSON.stringify(comparisonData));
+    updated.normalizedHeadcount = newHeadcount;
+
+    // Scale recurring fee sections (Software, Service) — these are PEPM-based annualized values
+    const recurringNames = ['Software Fees (Recurring)', 'Service Fees (Recurring)'];
+    for (const section of updated.sections) {
+      if (!recurringNames.includes(section.name)) continue;
+      for (const row of section.rows) {
+        if (row.isSubtotal) continue;
+        for (const val of row.values) {
+          if (val.amount !== null && val.amount !== 0) {
+            val.amount = Math.round(val.amount * ratio);
+            val.display = formatCurrency(val.amount);
+          }
+        }
+      }
+    }
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
     debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
@@ -405,8 +480,11 @@ export default function AnalysisPage() {
                 onCellEdit={handleCellEdit}
                 discountToggles={discountToggles}
                 onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
+                hiddenRows={hiddenRows}
+                onToggleHidden={canEdit ? handleToggleHidden : undefined}
                 onAddRow={canEdit ? handleAddRow : undefined}
                 onDeleteRow={canEdit ? handleDeleteRow : undefined}
+                onHeadcountChange={canEdit ? handleHeadcountChange : undefined}
               />
             </div>
 

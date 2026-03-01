@@ -1,6 +1,7 @@
 'use client';
 
-import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles } from '@/types';
+import { useState } from 'react';
+import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles, HiddenRows } from '@/types';
 import EditableCell from './EditableCell';
 
 interface ComparisonTableProps {
@@ -15,9 +16,12 @@ interface ComparisonTableProps {
   ) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
+  hiddenRows?: HiddenRows;
+  onToggleHidden?: (rowId: string) => void;
   vendorColors?: Record<string, string>;
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
+  onHeadcountChange?: (newHeadcount: number) => void;
 }
 
 const TOTALS_SECTION = 'Totals';
@@ -28,9 +32,12 @@ export default function ComparisonTable({
   onCellEdit,
   discountToggles,
   onDiscountToggle,
+  hiddenRows,
+  onToggleHidden,
   vendorColors,
   onAddRow,
   onDeleteRow,
+  onHeadcountChange,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, { bg: string; text: string }> = {
     'Software Fees (Recurring)': { bg: 'bg-indigo-700', text: 'text-white' },
@@ -80,19 +87,12 @@ export default function ComparisonTable({
             ))}
           </tr>
           {data.normalizedHeadcount && (
-            <tr className="bg-indigo-50/50">
-              <td className="px-4 py-1.5 text-xs text-indigo-500 border-b border-slate-100">
-                Normalized to
-              </td>
-              {data.vendors.map((vendor) => (
-                <td
-                  key={vendor}
-                  className="px-4 py-1.5 text-xs text-indigo-500 text-center border-b border-slate-100"
-                >
-                  {data.normalizedHeadcount} employees
-                </td>
-              ))}
-            </tr>
+            <HeadcountRow
+              headcount={data.normalizedHeadcount}
+              vendorCount={data.vendors.length}
+              isEditable={isEditable && !!onHeadcountChange}
+              onHeadcountChange={onHeadcountChange}
+            />
           )}
         </thead>
         <tbody>
@@ -107,6 +107,8 @@ export default function ComparisonTable({
               onCellEdit={onCellEdit}
               discountToggles={discountToggles}
               onDiscountToggle={onDiscountToggle}
+              hiddenRows={hiddenRows}
+              onToggleHidden={onToggleHidden}
               onAddRow={onAddRow}
               onDeleteRow={onDeleteRow}
             />
@@ -114,6 +116,74 @@ export default function ComparisonTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function HeadcountRow({
+  headcount,
+  vendorCount,
+  isEditable,
+  onHeadcountChange,
+}: {
+  headcount: number;
+  vendorCount: number;
+  isEditable: boolean;
+  onHeadcountChange?: (newHeadcount: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(headcount));
+
+  const handleSave = () => {
+    setEditing(false);
+    const parsed = parseInt(draft.replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed !== headcount) {
+      onHeadcountChange?.(parsed);
+    } else {
+      setDraft(String(headcount));
+    }
+  };
+
+  return (
+    <tr className="bg-indigo-50/50">
+      <td className="px-4 py-1.5 text-xs text-indigo-500 border-b border-slate-100">
+        Normalized to
+      </td>
+      {Array.from({ length: vendorCount }).map((_, i) => (
+        <td
+          key={i}
+          className="px-4 py-1.5 text-xs text-indigo-500 text-center border-b border-slate-100"
+        >
+          {isEditable && editing ? (
+            <input
+              className="w-20 px-1.5 py-0.5 text-xs text-center border border-indigo-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Escape') {
+                  setDraft(String(headcount));
+                  setEditing(false);
+                }
+              }}
+              autoFocus={i === 0}
+            />
+          ) : (
+            <span
+              className={isEditable ? 'cursor-pointer hover:underline' : ''}
+              onClick={() => {
+                if (isEditable) {
+                  setDraft(String(headcount));
+                  setEditing(true);
+                }
+              }}
+            >
+              {headcount} employees
+            </span>
+          )}
+        </td>
+      ))}
+    </tr>
   );
 }
 
@@ -126,6 +196,8 @@ function SectionBlock({
   onCellEdit,
   discountToggles,
   onDiscountToggle,
+  hiddenRows,
+  onToggleHidden,
   onAddRow,
   onDeleteRow,
 }: {
@@ -137,6 +209,8 @@ function SectionBlock({
   onCellEdit: (si: number, ri: number, vi: number, display: string, amount: number | null) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
+  hiddenRows?: HiddenRows;
+  onToggleHidden?: (rowId: string) => void;
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
 }) {
@@ -169,16 +243,19 @@ function SectionBlock({
         const isComputed = row.isSubtotal || isTotalsSection;
         const canEditCell = isEditable && !isComputed;
         const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
+        const isRowHidden = hiddenRows?.[row.id] === true;
 
         return (
           <tr
             key={row.id}
             className={`group ${
-              row.isSubtotal
-                ? 'bg-slate-50 font-semibold'
-                : isDiscountRow
-                  ? 'bg-amber-50/30'
-                  : 'hover:bg-slate-50/50'
+              isRowHidden
+                ? 'opacity-40 bg-slate-50/50'
+                : row.isSubtotal
+                  ? 'bg-slate-50 font-semibold'
+                  : isDiscountRow
+                    ? 'bg-amber-50/30'
+                    : 'hover:bg-slate-50/50'
             } border-b border-slate-100`}
           >
             <td className="px-4 py-2.5 text-sm text-slate-700 border-r border-slate-100">
@@ -194,7 +271,27 @@ function SectionBlock({
                     </svg>
                   </button>
                 )}
-                <span className={canDelete && onDeleteRow ? '' : ''}>{row.label}</span>
+                {isEditable && !row.isSubtotal && !isTotalsSection && onToggleHidden && (
+                  <button
+                    onClick={() => onToggleHidden(row.id)}
+                    className={`opacity-0 group-hover:opacity-100 flex-shrink-0 transition ${
+                      isRowHidden ? 'text-slate-500 opacity-100' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                    title={isRowHidden ? 'Show row (include in calculations)' : 'Hide row (exclude from calculations)'}
+                  >
+                    {isRowHidden ? (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+                <span className={isRowHidden ? 'line-through' : ''}>{row.label}</span>
                 {isDiscountSection && isDiscountRow && onDiscountToggle && (
                   <DiscountToggleButtons
                     rowId={row.id}

@@ -1,4 +1,4 @@
-import { ComparisonTable, DiscountToggles, TableSection, VendorValue } from '@/types';
+import { ComparisonTable, DiscountToggles, HiddenRows, TableSection, VendorValue } from '@/types';
 import { formatCurrency } from '@/lib/utils';
 
 const SOFTWARE_SECTION = 'Software Fees (Recurring)';
@@ -7,14 +7,28 @@ const SERVICE_SECTION = 'Service Fees (Recurring)';
 const DISCOUNT_SECTION = 'Discounts';
 const TOTALS_SECTION = 'Totals';
 
+/** Check if a display value represents a zero-contribution cell (not a "To be confirmed"). */
+function isZeroContribution(display: string): boolean {
+  const d = display.toLowerCase().trim();
+  return (
+    d === 'not included' ||
+    d === 'n/a' ||
+    d === 'included' ||
+    d === 'included in bundle' ||
+    d === 'hidden' ||
+    d === '$0' ||
+    d === '-'
+  );
+}
+
 /**
- * Sum the amounts of non-subtotal data rows in a section for a given vendor index.
+ * Sum the amounts of non-subtotal, non-hidden data rows in a section for a given vendor index.
  * Returns null if any contributing row has a null amount (meaning "To be confirmed").
- * Treats "Not included", "N/A", "Included", "Included in bundle" as $0 (not null).
  */
 function sumDataRows(
   section: TableSection | undefined,
-  vendorIndex: number
+  vendorIndex: number,
+  hiddenRows: HiddenRows
 ): number | null {
   if (!section) return 0;
   let sum = 0;
@@ -22,21 +36,14 @@ function sumDataRows(
 
   for (const row of section.rows) {
     if (row.isSubtotal) continue;
+    if (hiddenRows[row.id]) continue; // Skip hidden rows
     const val = row.values[vendorIndex];
     if (!val) continue;
 
     if (val.amount !== null) {
       sum += val.amount;
     } else {
-      const d = val.display.toLowerCase().trim();
-      const isZeroContribution =
-        d === 'not included' ||
-        d === 'n/a' ||
-        d === 'included' ||
-        d === 'included in bundle' ||
-        d === '$0' ||
-        d === '-';
-      if (!isZeroContribution) {
+      if (!isZeroContribution(val.display)) {
         hasNull = true;
       }
     }
@@ -104,7 +111,8 @@ function safeAdd(...values: (number | null)[]): number | null {
  */
 export function recalculateTable(
   data: ComparisonTable,
-  discountToggles: DiscountToggles
+  discountToggles: DiscountToggles,
+  hiddenRows: HiddenRows = {}
 ): ComparisonTable {
   const result: ComparisonTable = JSON.parse(JSON.stringify(data));
   const vendorCount = result.vendors.length;
@@ -119,7 +127,7 @@ export function recalculateTable(
     for (const row of section.rows) {
       if (!row.isSubtotal) continue;
       for (let vi = 0; vi < vendorCount; vi++) {
-        const total = sumDataRows(section, vi);
+        const total = sumDataRows(section, vi, hiddenRows);
         row.values[vi] = makeValue(total, row.values[vi]);
       }
     }
@@ -139,14 +147,14 @@ export function recalculateTable(
     if (!section) return 0;
     const subtotalRow = section.rows.find((r) => r.isSubtotal);
     if (subtotalRow) return subtotalRow.values[vi]?.amount ?? null;
-    return sumDataRows(section, vi);
+    return sumDataRows(section, vi, hiddenRows);
   }
 
   for (let vi = 0; vi < vendorCount; vi++) {
     const vendorName = result.vendors[vi];
     const softwareTotal = getSectionTotal(softwareSection, vi);
-    const implTotal = sumDataRows(implSection, vi);
-    const serviceTotal = sumDataRows(serviceSection, vi);
+    const implTotal = sumDataRows(implSection, vi, hiddenRows);
+    const serviceTotal = sumDataRows(serviceSection, vi, hiddenRows);
     const discountTotal = sumDiscounts(discountSection, vi, vendorName, discountToggles);
 
     const y1Before = safeAdd(softwareTotal ?? 0, implTotal ?? 0, serviceTotal ?? 0);

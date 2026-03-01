@@ -57,16 +57,20 @@ export default function EditableCell({
     }
   };
 
-  const lowerValue = value.toLowerCase();
+  const lowerValue = value.toLowerCase().trim();
   const isIncluded = lowerValue === 'included' || lowerValue === 'included in bundle';
   const isNotIncluded = lowerValue === 'not included';
-  const isUnconfirmed = !isConfirmed;
-  const isCurrency = /^\$[\d,]+/.test(value);
+  const isHidden = lowerValue === 'hidden';
+  const isUnconfirmed = !isConfirmed && !isHidden;
+  const isCurrency = /^-?\$[\d,]+/.test(value);
 
   let cellBg = '';
   let textClass = 'text-slate-900';
 
-  if (isIncluded) {
+  if (isHidden) {
+    cellBg = 'bg-slate-50';
+    textClass = 'text-slate-400 italic';
+  } else if (isIncluded) {
     cellBg = '';
     textClass = 'text-green-600';
   } else if (isNotIncluded) {

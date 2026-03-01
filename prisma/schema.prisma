@@ -65,6 +65,7 @@ model Analysis {
   nextSteps            String?
   citations            String?
   discountToggles      String?
+  hiddenRows           String?
   parsedProposals      String?        // JSON: stored parsed proposals for finalization
   clarifyingQuestions  String?        // JSON: AI-generated questions
   advisorAnswers       String?        // JSON: advisor responses to questions

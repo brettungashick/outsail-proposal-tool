@@ -90,6 +90,9 @@ export interface ParsedLineItem {
 // Discount toggle state: { "VendorName": { "discountId": true/false } }
 export type DiscountToggles = Record<string, Record<string, boolean>>;
 
+// Hidden row toggle state: { "rowId": true } — rows hidden for standardization
+export type HiddenRows = Record<string, boolean>;
+
 export interface ClarifyingQuestion {
   id: string;
   category: 'missing_data' | 'ambiguity' | 'discrepancy' | 'assumption' | 'general';
