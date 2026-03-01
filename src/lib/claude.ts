@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ParsedProposal, AnalysisResult, ClarifyingQuestion, ComparisonTable } from '@/types';
 import { augmentAuditData, buildInitialAuditLog } from '@/lib/audit';
+import { applyPlaybookRules, PlaybookRule } from '@/lib/playbook-engine';
+import { prisma } from '@/lib/prisma';
 
 function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
@@ -326,6 +328,34 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
     // Post-process: assign stable section IDs and augment cells with audit source pointers
     assignSectionIds(result.comparisonTable);
     augmentAuditData(result.comparisonTable, parsedProposals);
+
+    // Apply playbook rules — fetch enabled rules and apply to the table
+    try {
+      const dbRules = await prisma.vendorPlaybookRule.findMany({
+        where: { enabled: true },
+      });
+      const rules: PlaybookRule[] = dbRules.map((r) => ({
+        id: r.id,
+        vendorName: r.vendorName,
+        name: r.name,
+        conditionType: r.conditionType as 'contains' | 'regex',
+        conditionValue: r.conditionValue,
+        conditionField: r.conditionField as 'label' | 'section' | 'display',
+        actionType: r.actionType as 'set_status' | 'add_note',
+        actionValue: r.actionValue,
+        confidence: r.confidence as 'sure' | 'maybe',
+        enabled: r.enabled,
+        version: r.version,
+      }));
+      const modified = applyPlaybookRules(result.comparisonTable, rules);
+      if (modified > 0) {
+        console.log(`Playbook engine applied rules to ${modified} cell(s)`);
+      }
+    } catch (err) {
+      // Playbook application is non-critical — log and continue
+      console.error('Failed to apply playbook rules:', err);
+    }
+
     result.comparisonTable.auditLog = buildInitialAuditLog(result.comparisonTable);
 
     return result;

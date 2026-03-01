@@ -10,6 +10,7 @@ import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
 import AuditDrawer from '@/components/AuditDrawer';
+import PromoteToMemory from '@/components/PromoteToMemory';
 import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus } from '@/types';
 import { recalculateTable } from '@/lib/recalculate';
 import { generateId, formatCurrency } from '@/lib/utils';
@@ -47,6 +48,17 @@ export default function AnalysisPage() {
   const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [auditDrawer, setAuditDrawer] = useState<{ si: number; ri: number; vi: number } | null>(null);
+  const [promoteEvent, setPromoteEvent] = useState<{
+    eventId?: string;
+    vendorName: string;
+    sectionName: string;
+    rowLabel: string;
+    editType: 'status_change' | 'label_change' | 'value_change';
+    oldDisplay: string;
+    newDisplay: string;
+    oldStatus?: string;
+    newStatus?: string;
+  } | null>(null);
 
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -179,6 +191,7 @@ export default function AnalysisPage() {
   const userId = (session?.user as { id: string } | undefined)?.id;
 
   // Fire-and-forget learning event emission — never blocks the UI
+  // For status_change and label_change, shows promote-to-memory toast
   const emitLearningEvent = useCallback((event: {
     analysisId: string;
     projectId: string;
@@ -199,7 +212,24 @@ export default function AnalysisPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(event),
-    }).catch(() => {}); // Silently ignore failures
+    }).then(async (res) => {
+      if (!res.ok) return;
+      const saved = await res.json();
+      // Show promote toast for high-signal edits
+      if (event.editType === 'status_change' || event.editType === 'label_change') {
+        setPromoteEvent({
+          eventId: saved.id,
+          vendorName: event.vendorName,
+          sectionName: event.sectionName,
+          rowLabel: event.rowLabel,
+          editType: event.editType,
+          oldDisplay: event.oldDisplay,
+          newDisplay: event.newDisplay,
+          oldStatus: event.oldStatus,
+          newStatus: event.newStatus,
+        });
+      }
+    }).catch(() => {});
   }, []);
 
   const applyOverride = (
@@ -735,6 +765,12 @@ export default function AnalysisPage() {
           } : undefined}
         />
       )}
+
+      {/* Promote to Memory Toast */}
+      <PromoteToMemory
+        event={promoteEvent}
+        onDismiss={() => setPromoteEvent(null)}
+      />
     </Sidebar>
   );
 }

@@ -20,6 +20,8 @@ export interface CellAudit {
   sources: SourcePointer[];
   override: OverrideMetadata | null;
   formula: string | null;
+  playbookRuleId?: string;
+  playbookRuleVersion?: number;
 }
 
 export interface CellAuditEvent {

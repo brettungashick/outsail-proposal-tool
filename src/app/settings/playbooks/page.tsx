@@ -28,6 +28,18 @@ interface Vendor {
   name: string;
 }
 
+interface Suggestion {
+  vendorName: string;
+  editType: string;
+  rowLabel: string;
+  newDisplay: string;
+  newStatus: string | null;
+  sectionName: string;
+  count: number;
+  latestAt: string;
+  exampleEventIds: string[];
+}
+
 const CONDITION_TYPES = [
   { value: 'contains', label: 'Contains' },
   { value: 'regex', label: 'Regex' },
@@ -77,6 +89,8 @@ export default function PlaybooksSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [filterVendor, setFilterVendor] = useState('');
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   const userRole = (session?.user as { role?: string })?.role;
 
@@ -89,6 +103,7 @@ export default function PlaybooksSettingsPage() {
     if (status === 'authenticated') {
       fetchRules();
       fetchVendors();
+      fetchSuggestions();
     }
   }, [status]);
 
@@ -101,6 +116,37 @@ export default function PlaybooksSettingsPage() {
   const fetchVendors = async () => {
     const res = await fetch('/api/vendors');
     if (res.ok) setVendors(await res.json());
+  };
+
+  const fetchSuggestions = async () => {
+    setSuggestionsLoading(true);
+    try {
+      const res = await fetch('/api/playbooks/suggestions');
+      if (res.ok) setSuggestions(await res.json());
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const handleApproveSuggestion = (suggestion: Suggestion) => {
+    // Pre-fill the form from the suggestion
+    const isStatusChange = suggestion.editType === 'status_change';
+    setEditingId(null);
+    setForm({
+      vendorName: suggestion.vendorName || '*',
+      name: isStatusChange
+        ? `Set "${suggestion.rowLabel}" to ${suggestion.newDisplay}`
+        : `Correct "${suggestion.rowLabel}" to ${suggestion.newDisplay}`,
+      conditionType: 'contains',
+      conditionValue: suggestion.rowLabel,
+      conditionField: 'label',
+      actionType: isStatusChange ? 'set_status' : 'add_note',
+      actionValue: '',
+      confidence: 'sure',
+      statusValue: (isStatusChange && suggestion.newStatus ? suggestion.newStatus : 'included') as CellStatus,
+      noteValue: isStatusChange ? '' : `Should be: ${suggestion.newDisplay}`,
+    });
+    setShowForm(true);
   };
 
   const buildActionValue = (): string => {
@@ -353,6 +399,63 @@ export default function PlaybooksSettingsPage() {
             </tbody>
           </table>
         </div>
+
+        {/* Suggested Rules */}
+        {suggestions.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-lg font-semibold text-slate-900 mb-3">Suggested Rules</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              These patterns were detected from repeated advisor corrections. Approve to create a playbook rule.
+            </p>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-amber-50 border-b border-slate-200">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Vendor</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Row Label</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase">Correction</th>
+                    <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase">Times</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suggestions.map((s, i) => (
+                    <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                      <td className="px-4 py-3 text-sm text-slate-900">
+                        {s.vendorName || (
+                          <span className="text-slate-400">Any</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-slate-900">{s.rowLabel}</td>
+                      <td className="px-4 py-3 text-sm text-slate-600">
+                        <span className="text-xs text-slate-400">{s.editType === 'status_change' ? 'Status' : 'Value'}</span>{' '}
+                        <span className="font-mono text-xs bg-green-50 text-green-700 px-1.5 py-0.5 rounded">
+                          {s.newDisplay}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
+                          {s.count}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => handleApproveSuggestion(s)}
+                          className="text-xs text-white bg-outsail-blue-dark px-3 py-1.5 rounded-lg hover:bg-outsail-navy transition"
+                        >
+                          Approve
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+        {suggestionsLoading && suggestions.length === 0 && (
+          <div className="mt-8 text-center text-sm text-slate-400">Loading suggestions...</div>
+        )}
 
         {/* Add/Edit Form Modal */}
         {showForm && (
