@@ -1,26 +1,22 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
   const scope = req.nextUrl.searchParams.get('scope') || 'mine';
 
   let whereClause = {};
-  if (scope === 'team') {
-    whereClause = { advisorId: { not: userId } };
-  } else if (scope === 'all' && userRole === 'admin') {
+  if ((scope === 'team' || scope === 'all') && sessionUser.role === 'admin') {
+    // Admins can see all projects
     whereClause = {};
   } else {
-    // Default: mine
-    whereClause = { advisorId: userId };
+    // Non-admins only see their own projects
+    whereClause = { advisorId: sessionUser.id };
   }
 
   const projects = await prisma.project.findMany({
@@ -38,15 +34,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
   const body = await req.json();
 
-  // Auto-generate project name: "ClientName Month YY"
   const now = new Date();
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
@@ -57,7 +51,7 @@ export async function POST(req: NextRequest) {
       name: autoName,
       clientName: body.clientName,
       clientEmail: body.clientEmail || null,
-      advisorId: userId,
+      advisorId: sessionUser.id,
     },
   });
 

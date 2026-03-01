@@ -1,22 +1,24 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireProjectAccess } from '@/lib/access';
 import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
   const body = await req.json();
   const { projectId } = body;
 
-  // Verify project
+  const hasAccess = await requireProjectAccess(projectId, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  }
+
   const project = await prisma.project.findFirst({
-    where: { id: projectId, advisorId: userId },
+    where: { id: projectId },
     include: { documents: true },
   });
 
@@ -110,7 +112,7 @@ export async function POST(req: NextRequest) {
         comparisonData: '{}', // placeholder until finalized
         parsedProposals: JSON.stringify(parsedProposals),
         clarifyingQuestions: JSON.stringify(questions),
-        createdBy: userId,
+        createdBy: sessionUser.id,
       },
     });
 

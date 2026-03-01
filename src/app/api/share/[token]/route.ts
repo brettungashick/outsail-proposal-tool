@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireShareAccess } from '@/lib/access';
 
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
+    return NextResponse.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401 });
+  }
+
+  const { allowed, reason } = await requireShareAccess(params.token, sessionUser);
+  if (!allowed) {
+    const status = reason === 'Invalid share link' ? 404
+      : reason === 'Share link has expired' ? 410
+      : 403;
+    return NextResponse.json({ error: reason }, { status });
+  }
+
   const shareLink = await prisma.shareLink.findUnique({
     where: { token: params.token },
     include: {
@@ -18,10 +32,6 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
 
   if (!shareLink) {
     return NextResponse.json({ error: 'Invalid share link' }, { status: 404 });
-  }
-
-  if (new Date() > shareLink.expiresAt) {
-    return NextResponse.json({ error: 'Share link has expired' }, { status: 410 });
   }
 
   const latestAnalysis = shareLink.project.analyses[0] || null;

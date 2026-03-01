@@ -1,23 +1,18 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
-  const userId = (session.user as { id: string }).id;
-
-  if (userRole !== 'admin') {
+  if (sessionUser.role !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
 
-  // Don't allow deleting yourself
-  if (params.id === userId) {
+  if (params.id === sessionUser.id) {
     return NextResponse.json({ error: 'You cannot remove yourself' }, { status: 400 });
   }
 
@@ -26,7 +21,6 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  // Check if user has projects — reassign or block
   const projectCount = await prisma.project.count({ where: { advisorId: params.id } });
   if (projectCount > 0) {
     return NextResponse.json(

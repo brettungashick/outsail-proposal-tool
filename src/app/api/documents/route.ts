@@ -1,16 +1,13 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireProjectAccess } from '@/lib/access';
 import { extractTextFromBuffer, getFileType } from '@/lib/file-parser';
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-
-  const userId = (session.user as { id: string }).id;
 
   const formData = await req.formData();
   const file = formData.get('file') as File;
@@ -22,17 +19,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
-  // Verify project belongs to user
-  const project = await prisma.project.findFirst({
-    where: { id: projectId, advisorId: userId },
-  });
-  if (!project) {
+  const hasAccess = await requireProjectAccess(projectId, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
   const fileType = getFileType(file.name);
 
-  // Extract text from file in memory (no disk write needed)
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
@@ -44,7 +37,6 @@ export async function POST(req: NextRequest) {
     rawText = 'Error extracting text from file';
   }
 
-  // Compute quoteVersion for updated quotes
   let quoteVersion = 1;
   if (documentType === 'updated_quote') {
     const existingVersions = await prisma.document.findMany({
@@ -55,7 +47,6 @@ export async function POST(req: NextRequest) {
     const maxExisting = existingVersions[0]?.quoteVersion || 0;
     quoteVersion = maxExisting + 1;
 
-    // When uploading an updated quote, deactivate previous initial quotes for this vendor
     await prisma.document.updateMany({
       where: {
         projectId,
@@ -65,7 +56,6 @@ export async function POST(req: NextRequest) {
       data: { isActive: false },
     });
 
-    // Deactivate previous updated quotes for this vendor
     await prisma.document.updateMany({
       where: {
         projectId,
@@ -76,7 +66,6 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Save to database
   const document = await prisma.document.create({
     data: {
       projectId,
@@ -91,5 +80,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return NextResponse.json(document, { status: 201 });
+  // Return without rawText to avoid exposing large text in response
+  return NextResponse.json({
+    id: document.id,
+    projectId: document.projectId,
+    vendorName: document.vendorName,
+    fileName: document.fileName,
+    fileType: document.fileType,
+    documentType: document.documentType,
+    quoteVersion: document.quoteVersion,
+    isActive: document.isActive,
+    uploadedAt: document.uploadedAt,
+  }, { status: 201 });
 }

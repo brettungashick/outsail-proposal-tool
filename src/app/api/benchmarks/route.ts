@@ -1,25 +1,22 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const searchParams = req.nextUrl.searchParams;
-  const vendorIdsParam = searchParams.get('vendorIds'); // comma-separated vendor IDs
+  const vendorIdsParam = searchParams.get('vendorIds');
   const minHeadcount = parseInt(searchParams.get('minHeadcount') || '0') || 0;
   const maxHeadcount = parseInt(searchParams.get('maxHeadcount') || '0') || 0;
   const months = parseInt(searchParams.get('months') || '12') || 12;
 
-  // Load vendor lookup table for enriching results
   const allVendors = await prisma.vendor.findMany();
   const vendorMap = new Map(allVendors.map((v) => [v.name.toLowerCase(), v]));
 
-  // Resolve selected vendor IDs to names for filtering
   let filterVendorNames: string[] = [];
   if (vendorIdsParam) {
     const selectedIds = vendorIdsParam.split(',').map((id) => id.trim());
@@ -28,17 +25,22 @@ export async function GET(req: NextRequest) {
       .map((v) => v.name.toLowerCase());
   }
 
-  // Get all completed projects with their latest analysis
   const cutoffDate = new Date();
   cutoffDate.setMonth(cutoffDate.getMonth() - months);
+
+  // Non-admins only see their own projects in benchmarks
+  const ownerFilter = sessionUser.role === 'admin'
+    ? {}
+    : { advisorId: sessionUser.id };
 
   const projects = await prisma.project.findMany({
     where: {
       status: 'complete',
       updatedAt: { gte: cutoffDate },
+      ...ownerFilter,
     },
     include: {
-      advisor: { select: { name: true, email: true } },
+      advisor: { select: { name: true } },
       analyses: {
         orderBy: { version: 'desc' },
         take: 1,
@@ -51,7 +53,6 @@ export async function GET(req: NextRequest) {
     orderBy: { updatedAt: 'desc' },
   });
 
-  // Filter and extract benchmark data
   const results = projects
     .filter((p) => p.analyses.length > 0)
     .map((p) => {
@@ -66,7 +67,6 @@ export async function GET(req: NextRequest) {
       const vendors: string[] = comparisonData.vendors || [];
       const headcount: number | null = comparisonData.normalizedHeadcount || null;
 
-      // Filter by selected vendor objects
       if (filterVendorNames.length > 0) {
         const hasMatch = vendors.some((v) =>
           filterVendorNames.some((fv) => v.toLowerCase().includes(fv))
@@ -74,11 +74,9 @@ export async function GET(req: NextRequest) {
         if (!hasMatch) return null;
       }
 
-      // Filter by headcount if specified
       if (minHeadcount && headcount && headcount < minHeadcount) return null;
       if (maxHeadcount && headcount && headcount > maxHeadcount) return null;
 
-      // Extract key totals from Totals section
       const totalsSection = comparisonData.sections?.find(
         (s: { name: string }) => s.name === 'Totals'
       );
@@ -102,7 +100,6 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      // Enrich vendors with Vendor object data (logo, color)
       const vendorsEnriched = vendors.map((v) => {
         const vendorObj = vendorMap.get(v.toLowerCase());
         return {

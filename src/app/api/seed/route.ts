@@ -135,6 +135,9 @@ export async function GET() {
     `);
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "ShareLink_token_key" ON "ShareLink"("token")`);
 
+    await addColumnSafe('ShareLink', 'allowedDomain', "TEXT NOT NULL DEFAULT ''");
+    await addColumnSafe('ShareLink', 'accessMode', "TEXT NOT NULL DEFAULT 'domain'");
+
     // Vendor table
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "Vendor" (

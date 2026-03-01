@@ -1,6 +1,7 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { useEffect, useState, useCallback } from 'react';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
@@ -26,17 +27,29 @@ interface ShareData {
 
 export default function SharePage() {
   const params = useParams();
+  const router = useRouter();
+  const { status: authStatus } = useSession();
   const token = params.token as string;
 
   const [data, setData] = useState<ShareData | null>(null);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
   const [loading, setLoading] = useState(true);
+
+  // Redirect to login if not authenticated, preserving the share URL as callbackUrl
+  useEffect(() => {
+    if (authStatus === 'unauthenticated') {
+      const callbackUrl = encodeURIComponent(`/share/${token}`);
+      router.push(`/login?callbackUrl=${callbackUrl}`);
+    }
+  }, [authStatus, token, router]);
 
   const fetchShareData = useCallback(async () => {
     try {
       const res = await fetch(`/api/share/${token}`);
       if (!res.ok) {
         const err = await res.json();
+        setErrorCode(err.code || '');
         throw new Error(err.error || 'Invalid link');
       }
       const result = await res.json();
@@ -49,8 +62,18 @@ export default function SharePage() {
   }, [token]);
 
   useEffect(() => {
-    fetchShareData();
-  }, [fetchShareData]);
+    if (authStatus === 'authenticated') {
+      fetchShareData();
+    }
+  }, [authStatus, fetchShareData]);
+
+  if (authStatus === 'loading' || authStatus === 'unauthenticated') {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-slate-500">Redirecting to sign in...</div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -64,7 +87,9 @@ export default function SharePage() {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
-          <h1 className="text-xl font-bold text-slate-900 mb-2">Link Error</h1>
+          <h1 className="text-xl font-bold text-slate-900 mb-2">
+            {errorCode === 'AUTH_REQUIRED' ? 'Sign In Required' : 'Access Denied'}
+          </h1>
           <p className="text-slate-500">{error || 'This link is invalid or has expired.'}</p>
         </div>
       </div>
@@ -108,13 +133,11 @@ export default function SharePage() {
           </p>
         </div>
 
-        {/* Comparison Table - Read Only */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
           <h2 className="font-semibold text-slate-900 mb-4">Side-by-Side Comparison</h2>
           <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => { /* read-only */ }} />
         </div>
 
-        {/* Notes - Read Only */}
         <div className="mb-6">
           <h2 className="font-semibold text-slate-900 text-lg mb-4">Analysis Notes</h2>
           <NotesSection
@@ -128,12 +151,10 @@ export default function SharePage() {
           />
         </div>
 
-        {/* Citations */}
         <div className="mb-6">
           <CitationsSection citations={citations} />
         </div>
 
-        {/* Footer */}
         <div className="text-center py-8 border-t border-slate-200">
           <p className="text-sm text-slate-400">
             Prepared by OutSail · Proposal Analysis Tool

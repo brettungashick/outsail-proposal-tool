@@ -1,17 +1,19 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 import { generateComparison, isApiKeyConfigured } from '@/lib/claude';
 import { ParsedProposal } from '@/types';
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const hasAccess = await requireAnalysisAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  }
 
   const analysis = await prisma.analysis.findUnique({
     where: { id: params.id },
@@ -24,14 +26,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   if (analysis.status !== 'clarifying') {
     return NextResponse.json({ error: 'Analysis is not in clarifying state' }, { status: 400 });
-  }
-
-  if (analysis.project.advisorId !== userId) {
-    // Check if admin
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (user?.role !== 'admin') {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
-    }
   }
 
   if (!isApiKeyConfigured()) {

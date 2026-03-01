@@ -1,17 +1,15 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 import bcrypt from 'bcryptjs';
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = (session.user as { id: string }).id;
     const { currentPassword, newPassword } = await req.json();
 
     if (!currentPassword || !newPassword) {
@@ -22,11 +20,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 });
     }
 
-    // Look up by session ID first, fall back to email
-    let user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user && session.user.email) {
-      user = await prisma.user.findUnique({ where: { email: session.user.email.toLowerCase().trim() } });
-    }
+    const user = await prisma.user.findUnique({ where: { id: sessionUser.id } });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }

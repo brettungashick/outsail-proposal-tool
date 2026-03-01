@@ -43,6 +43,7 @@ export default function EditableCell({
   const [showTooltip, setShowTooltip] = useState(false);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setEditValue(value);
@@ -66,6 +67,13 @@ export default function EditableCell({
         onSave(editValue, null);
       }
     }
+  };
+
+  const handleBlur = (e: React.FocusEvent) => {
+    // If focus is moving to another element within the editing container (e.g. the select),
+    // don't exit editing mode yet.
+    if (containerRef.current?.contains(e.relatedTarget as Node)) return;
+    handleSave();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -128,13 +136,12 @@ export default function EditableCell({
 
   if (editing && canEdit) {
     return (
-      <div className="px-2 py-1.5">
+      <div ref={containerRef} className="px-2 py-1.5" onBlur={handleBlur}>
         <input
           ref={inputRef}
           type="text"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
           onKeyDown={handleKeyDown}
           placeholder="$0"
           className="w-full px-2 py-1 border border-indigo-400 rounded text-sm focus:ring-2 focus:ring-indigo-500 outline-none mb-1"

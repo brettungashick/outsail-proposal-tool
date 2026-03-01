@@ -1,15 +1,18 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Get the analysis to find the project
+  const hasAccess = await requireAnalysisAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  }
+
   const analysis = await prisma.analysis.findUnique({
     where: { id: params.id },
   });
@@ -18,7 +21,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
-  // Get all versions for this project
   const versions = await prisma.analysis.findMany({
     where: { projectId: analysis.projectId },
     orderBy: { version: 'desc' },
@@ -30,7 +32,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     },
   });
 
-  // Get all edits for the current analysis
   const edits = await prisma.analysisEdit.findMany({
     where: { analysisId: params.id },
     orderBy: { editedAt: 'desc' },

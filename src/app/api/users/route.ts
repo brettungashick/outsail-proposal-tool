@@ -1,15 +1,18 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, getAppBaseUrl } from '@/lib/access';
 import { sendInviteEmail } from '@/lib/email';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  if (sessionUser.role !== 'admin') {
+    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
 
   const users = await prisma.user.findMany({
@@ -29,13 +32,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
-  if (userRole !== 'admin') {
+  if (sessionUser.role !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
 
@@ -46,16 +48,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Email and name are required' }, { status: 400 });
   }
 
-  // Check if email already exists
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return NextResponse.json({ error: 'A user with this email already exists' }, { status: 409 });
   }
 
-  // Generate invite token
   const inviteToken = randomBytes(32).toString('hex');
-
-  // Create user with temporary password hash (they'll set their real password via invite link)
   const tempHash = await bcrypt.hash(randomBytes(16).toString('hex'), 12);
 
   const user = await prisma.user.create({
@@ -69,11 +67,9 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Build invite URL
-  const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const baseUrl = getAppBaseUrl();
   const inviteUrl = `${baseUrl}/invite/${inviteToken}`;
 
-  // Send invite email (non-blocking — still return the link as fallback)
   let emailSent = false;
   if (process.env.RESEND_API_KEY) {
     try {

@@ -1,7 +1,6 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser } from '@/lib/access';
 
 export async function GET() {
   try {
@@ -14,12 +13,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const sessionUser = await getSessionUser();
+    if (!sessionUser) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const role = (session.user as { role?: string }).role;
-    if (role !== 'admin') {
+    if (sessionUser.role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 
@@ -30,19 +28,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    // Validate file type
     const allowedTypes = ['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json({ error: 'File must be PNG, JPEG, SVG, or WebP' }, { status: 400 });
     }
 
-    // Validate file size (max 2MB)
     if (file.size > 2 * 1024 * 1024) {
       return NextResponse.json({ error: 'File must be under 2MB' }, { status: 400 });
     }
 
-    // Convert to base64 data URL and store in database
-    // (Vercel's filesystem is read-only, so we can't write to public/)
     const bytes = await file.arrayBuffer();
     const base64 = Buffer.from(bytes).toString('base64');
     const logoUrl = `data:${file.type};base64,${base64}`;

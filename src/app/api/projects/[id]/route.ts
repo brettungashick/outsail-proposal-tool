@@ -1,23 +1,30 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getSessionUser, requireProjectAccess } from '@/lib/access';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const hasAccess = await requireProjectAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  }
 
-  // Allow any authenticated advisor to read any project (team access)
   const project = await prisma.project.findFirst({
     where: { id: params.id },
     include: {
       advisor: { select: { id: true, name: true, email: true } },
-      documents: { orderBy: { uploadedAt: 'desc' } },
+      documents: {
+        orderBy: { uploadedAt: 'desc' },
+        select: {
+          id: true, projectId: true, vendorName: true, fileName: true,
+          filePath: true, fileType: true, documentType: true,
+          quoteVersion: true, isActive: true, uploadedAt: true,
+        },
+      },
       analyses: { orderBy: { version: 'desc' }, take: 1 },
       shareLinks: { orderBy: { createdAt: 'desc' } },
     },
@@ -27,24 +34,27 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  // Include ownership info for the client
-  const isOwner = project.advisorId === userId;
-  const isAdmin = userRole === 'admin';
+  const isOwner = project.advisorId === sessionUser.id;
+  const isAdmin = sessionUser.role === 'admin';
 
   return NextResponse.json({ ...project, isOwner, isAdmin });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const hasAccess = await requireProjectAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  }
+
   const body = await req.json();
 
-  const project = await prisma.project.updateMany({
-    where: { id: params.id, advisorId: userId },
+  await prisma.project.update({
+    where: { id: params.id },
     data: {
       name: body.name,
       clientName: body.clientName,
@@ -53,33 +63,18 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     },
   });
 
-  if (project.count === 0) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-  }
-
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
-
-  const project = await prisma.project.findFirst({
-    where: { id: params.id },
-  });
-
-  if (!project) {
+  const hasAccess = await requireProjectAccess(params.id, sessionUser.id, sessionUser.role);
+  if (!hasAccess) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-  }
-
-  // Only the owner or an admin can delete
-  if (project.advisorId !== userId && userRole !== 'admin') {
-    return NextResponse.json({ error: 'Only the project owner or an admin can delete this project' }, { status: 403 });
   }
 
   await prisma.project.delete({ where: { id: params.id } });

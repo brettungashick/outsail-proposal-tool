@@ -87,13 +87,15 @@ model AnalysisEdit {
 }
 
 model ShareLink {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  email     String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  token         String   @unique
+  email         String
+  allowedDomain String   @default("")
+  accessMode    String   @default("domain") // domain | public
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
 }
 
 model Vendor {
