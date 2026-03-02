@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getAppBaseUrl } from '@/lib/access';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { randomBytes } from 'crypto';
 
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+    const baseUrl = getAppBaseUrl();
     const resetUrl = `${baseUrl}/reset-password/${token}`;
 
     if (process.env.RESEND_API_KEY) {

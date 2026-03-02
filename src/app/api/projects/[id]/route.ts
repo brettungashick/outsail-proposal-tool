@@ -13,31 +13,61 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  const project = await prisma.project.findFirst({
-    where: { id: params.id },
-    include: {
-      advisor: { select: { id: true, name: true, email: true } },
-      documents: {
-        orderBy: { uploadedAt: 'desc' },
-        select: {
-          id: true, projectId: true, vendorName: true, fileName: true,
-          filePath: true, fileType: true, documentType: true,
-          quoteVersion: true, isActive: true, uploadedAt: true,
+  try {
+    // Try full query including shareLinks
+    const project = await prisma.project.findFirst({
+      where: { id: params.id },
+      include: {
+        advisor: { select: { id: true, name: true, email: true } },
+        documents: {
+          orderBy: { uploadedAt: 'desc' },
+          select: {
+            id: true, projectId: true, vendorName: true, fileName: true,
+            filePath: true, fileType: true, documentType: true,
+            quoteVersion: true, isActive: true, uploadedAt: true,
+          },
         },
+        analyses: { orderBy: { version: 'desc' }, take: 1 },
+        shareLinks: { orderBy: { createdAt: 'desc' } },
       },
-      analyses: { orderBy: { version: 'desc' }, take: 1 },
-      shareLinks: { orderBy: { createdAt: 'desc' } },
-    },
-  });
+    });
 
-  if (!project) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const isOwner = project.advisorId === sessionUser.id;
+    const isAdmin = sessionUser.role === 'admin';
+
+    return NextResponse.json({ ...project, isOwner, isAdmin });
+  } catch (err) {
+    // Fallback: shareLinks columns may not exist yet (run GET /api/seed to migrate)
+    console.error('Project query failed, retrying without shareLinks:', err);
+    const project = await prisma.project.findFirst({
+      where: { id: params.id },
+      include: {
+        advisor: { select: { id: true, name: true, email: true } },
+        documents: {
+          orderBy: { uploadedAt: 'desc' },
+          select: {
+            id: true, projectId: true, vendorName: true, fileName: true,
+            filePath: true, fileType: true, documentType: true,
+            quoteVersion: true, isActive: true, uploadedAt: true,
+          },
+        },
+        analyses: { orderBy: { version: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const isOwner = project.advisorId === sessionUser.id;
+    const isAdmin = sessionUser.role === 'admin';
+
+    return NextResponse.json({ ...project, shareLinks: [], isOwner, isAdmin });
   }
-
-  const isOwner = project.advisorId === sessionUser.id;
-  const isAdmin = sessionUser.role === 'admin';
-
-  return NextResponse.json({ ...project, isOwner, isAdmin });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
