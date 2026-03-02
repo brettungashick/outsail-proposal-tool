@@ -121,11 +121,18 @@ export async function requireShareAccess(
 }
 
 /**
- * Return the base URL from APP_URL env var, falling back to NEXTAUTH_URL / VERCEL_URL.
+ * Return the base URL. Derives from the request host header when available
+ * so links always match the domain the user is actually on (e.g. proposalcompare.io).
+ * Falls back to env vars and finally localhost.
  */
-export function getAppBaseUrl(): string {
+export function getAppBaseUrl(headers?: Headers): string {
   if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL;
   if (process.env.APP_URL) return process.env.APP_URL;
+  if (headers) {
+    const host = headers.get('x-forwarded-host') || headers.get('host');
+    const proto = headers.get('x-forwarded-proto') || 'https';
+    if (host) return `${proto}://${host}`;
+  }
   if (process.env.NEXTAUTH_URL) return process.env.NEXTAUTH_URL;
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
   return 'http://localhost:3000';

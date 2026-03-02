@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = getAppBaseUrl(req.headers);
   const shareUrl = `${baseUrl}/share/${token}`;
 
   return NextResponse.json({ ...shareLink, shareUrl }, { status: 201 });

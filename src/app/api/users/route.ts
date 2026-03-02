@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const baseUrl = getAppBaseUrl();
+  const baseUrl = getAppBaseUrl(req.headers);
   const inviteUrl = `${baseUrl}/invite/${inviteToken}`;
 
   let emailSent = false;
