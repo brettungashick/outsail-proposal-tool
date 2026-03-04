@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import SessionProvider from '@/components/SessionProvider';
+import DynamicFavicon from '@/components/DynamicFavicon';
 
 export const metadata: Metadata = {
   title: 'OutSail Proposal Analyzer',
@@ -11,7 +12,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="antialiased font-sans">
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider>
+          <DynamicFavicon />
+          {children}
+        </SessionProvider>
       </body>
     </html>
   );

@@ -35,6 +35,8 @@ export default function SharePage() {
   const [error, setError] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [loading, setLoading] = useState(true);
+  const [vendorColors, setVendorColors] = useState<Record<string, string>>({});
+  const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
 
   // Redirect to login if not authenticated, preserving the share URL as callbackUrl
   useEffect(() => {
@@ -64,6 +66,20 @@ export default function SharePage() {
   useEffect(() => {
     if (authStatus === 'authenticated') {
       fetchShareData();
+      // Fetch vendor metadata for logos/colors
+      fetch('/api/vendors')
+        .then((res) => (res.ok ? res.json() : []))
+        .then((vendors: { name: string; logoUrl: string | null; accentColor: string | null }[]) => {
+          const colors: Record<string, string> = {};
+          const logos: Record<string, string> = {};
+          for (const v of vendors) {
+            if (v.accentColor) colors[v.name] = v.accentColor;
+            if (v.logoUrl) logos[v.name] = v.logoUrl;
+          }
+          setVendorColors(colors);
+          setVendorLogos(logos);
+        })
+        .catch(() => {});
     }
   }, [authStatus, fetchShareData]);
 
@@ -135,7 +151,7 @@ export default function SharePage() {
 
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
           <h2 className="font-semibold text-slate-900 mb-4">Side-by-Side Comparison</h2>
-          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => { /* read-only */ }} />
+          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => { /* read-only */ }} vendorColors={vendorColors} vendorLogos={vendorLogos} />
         </div>
 
         <div className="mb-6">

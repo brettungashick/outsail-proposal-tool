@@ -19,6 +19,7 @@ interface ComparisonTableProps {
   hiddenRows?: HiddenRows;
   onToggleHidden?: (rowId: string) => void;
   vendorColors?: Record<string, string>;
+  vendorLogos?: Record<string, string>;
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
   onHeadcountChange?: (newHeadcount: number) => void;
@@ -38,6 +39,7 @@ export default function ComparisonTable({
   hiddenRows,
   onToggleHidden,
   vendorColors,
+  vendorLogos,
   onAddRow,
   onDeleteRow,
   onHeadcountChange,
@@ -60,17 +62,25 @@ export default function ComparisonTable({
       <div className="flex gap-4 mb-4 pl-64">
         {data.vendors.map((vendor) => {
           const color = vendorColors?.[vendor] || '#4F46E5';
+          const logo = vendorLogos?.[vendor];
           return (
             <div
               key={vendor}
               className="flex-1 min-w-[160px] bg-white rounded-xl border border-slate-200 p-4 text-center"
             >
-              <div
-                className="w-10 h-10 rounded-lg mx-auto mb-2 flex items-center justify-center text-white font-bold text-sm"
-                style={{ backgroundColor: color }}
-              >
-                {vendor.substring(0, 2).toUpperCase()}
-              </div>
+              {logo ? (
+                <div className="w-10 h-10 rounded-lg mx-auto mb-2 flex items-center justify-center overflow-hidden border border-slate-200 bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logo} alt={vendor} className="max-w-full max-h-full object-contain" />
+                </div>
+              ) : (
+                <div
+                  className="w-10 h-10 rounded-lg mx-auto mb-2 flex items-center justify-center text-white font-bold text-sm"
+                  style={{ backgroundColor: color }}
+                >
+                  {vendor.substring(0, 2).toUpperCase()}
+                </div>
+              )}
               <p className="text-sm font-semibold text-slate-900">{vendor}</p>
             </div>
           );

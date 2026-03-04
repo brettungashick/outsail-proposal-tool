@@ -22,10 +22,12 @@ export default function ShareManager({ projectId, shareLinks, onRefresh }: Share
   const [creating, setCreating] = useState(false);
   const [newLink, setNewLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
+    setError('');
     try {
       const res = await fetch('/api/share', {
         method: 'POST',
@@ -37,7 +39,12 @@ export default function ShareManager({ projectId, shareLinks, onRefresh }: Share
         setNewLink(data.shareUrl);
         setEmail('');
         onRefresh();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || `Failed to create share link (${res.status})`);
       }
+    } catch {
+      setError('Network error — please try again.');
     } finally {
       setCreating(false);
     }
@@ -69,9 +76,15 @@ export default function ShareManager({ projectId, shareLinks, onRefresh }: Share
         </button>
       </form>
 
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
       {newLink && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-          <p className="text-sm text-green-800 font-medium mb-2">Share link created!</p>
+          <p className="text-sm text-green-800 font-medium mb-2">Share link created and email sent!</p>
           <div className="flex gap-2">
             <input
               type="text"

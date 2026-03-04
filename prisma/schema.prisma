@@ -108,8 +108,9 @@ model Vendor {
 }
 
 model AppSettings {
-  id       String  @id @default("app")
-  logoUrl  String?
+  id         String  @id @default("app")
+  logoUrl    String?
+  faviconUrl String?
 }
 
 model LearningEvent {

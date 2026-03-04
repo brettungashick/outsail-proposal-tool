@@ -155,7 +155,8 @@ export async function GET() {
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "AppSettings" (
         "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'app',
-        "logoUrl" TEXT
+        "logoUrl" TEXT,
+        "faviconUrl" TEXT
       )
     `);
 

@@ -44,6 +44,39 @@ export async function sendInviteEmail(to: string, name: string, inviteUrl: strin
   });
 }
 
+export async function sendShareEmail(to: string, shareUrl: string, projectName: string, advisorName: string) {
+  await getResend().emails.send({
+    from: FROM_ADDRESS,
+    to,
+    subject: `${advisorName} shared a proposal comparison with you`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px 0;">
+        <div style="text-align: center; margin-bottom: 24px;">
+          <span style="font-size: 24px; font-weight: 700; color: #082f69;">Out</span><span style="font-size: 24px; font-weight: 700; color: #4277c7;">Sail</span>
+        </div>
+        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 32px;">
+          <h2 style="color: #0f172a; font-size: 20px; margin: 0 0 8px;">Proposal Comparison Ready</h2>
+          <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 0 0 24px;">
+            ${advisorName} has shared a side-by-side vendor comparison for <strong>${projectName}</strong>. Click below to review it.
+          </p>
+          <div style="text-align: center; margin: 24px 0;">
+            <a href="${shareUrl}" style="display: inline-block; background: #0052cc; color: #ffffff; padding: 12px 32px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none;">
+              View Comparison
+            </a>
+          </div>
+          <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin: 24px 0 0;">
+            This link expires in 30 days. If the button doesn't work, copy and paste this link:<br/>
+            <a href="${shareUrl}" style="color: #4277c7; word-break: break-all;">${shareUrl}</a>
+          </p>
+        </div>
+        <p style="color: #94a3b8; font-size: 11px; text-align: center; margin-top: 16px;">
+          OutSail Proposal Analyzer
+        </p>
+      </div>
+    `,
+  });
+}
+
 export async function sendPasswordResetEmail(to: string, name: string, resetUrl: string) {
   await getResend().emails.send({
     from: FROM_ADDRESS,
