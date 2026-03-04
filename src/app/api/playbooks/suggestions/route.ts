@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/access';
 
+function toVendorKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
 /**
  * GET /api/playbooks/suggestions
  *
  * Aggregates learning events to find repeated correction patterns
- * that could become playbook rules. Groups by (vendorName, editType,
- * rowLabel, newDisplay/newStatus) and returns patterns with 2+ occurrences.
+ * that could become playbook rules. Groups by (vendorKey, editType,
+ * rowId/rowLabel, newDisplay/newStatus) and returns patterns with 3+ occurrences.
  */
 export async function GET(req: NextRequest) {
   const sessionUser = await getSessionUser();
@@ -20,7 +24,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { searchParams } = req.nextUrl;
-  const minCount = Math.max(parseInt(searchParams.get('minCount') || '2', 10), 1);
+  const minCount = Math.max(parseInt(searchParams.get('minCount') || '3', 10), 1);
   const vendorName = searchParams.get('vendorName');
 
   // Fetch non-promoted events (not yet turned into rules)
@@ -36,10 +40,12 @@ export async function GET(req: NextRequest) {
     take: 1000,
   });
 
-  // Group by (vendorName, editType, rowLabel, newDisplay)
+  // Group by (vendorKey, editType, rowId, newDisplay) for stable grouping
   const groups = new Map<string, {
     vendorName: string;
+    vendorKey: string;
     editType: string;
+    rowId: string;
     rowLabel: string;
     newDisplay: string;
     newStatus: string | null;
@@ -50,7 +56,10 @@ export async function GET(req: NextRequest) {
   }>();
 
   for (const ev of events) {
-    const key = `${ev.vendorName}|${ev.editType}|${ev.rowLabel}|${ev.newDisplay}`;
+    const vendorKey = ev.vendorKey || toVendorKey(ev.vendorName);
+    // Use rowId for stable grouping, fall back to rowLabel for old events
+    const stableRowKey = ev.rowId || ev.rowLabel;
+    const key = `${vendorKey}|${ev.editType}|${stableRowKey}|${ev.newDisplay}`;
     const existing = groups.get(key);
     if (existing) {
       existing.count++;
@@ -63,7 +72,9 @@ export async function GET(req: NextRequest) {
     } else {
       groups.set(key, {
         vendorName: ev.vendorName,
+        vendorKey,
         editType: ev.editType,
+        rowId: ev.rowId,
         rowLabel: ev.rowLabel,
         newDisplay: ev.newDisplay,
         newStatus: ev.newStatus,

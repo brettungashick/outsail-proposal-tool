@@ -1,6 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
+
+function toVendorKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+const learningEventSchema = z.object({
+  analysisId: z.string().min(1),
+  projectId: z.string().min(1),
+  vendorName: z.string().min(1),
+  rowId: z.string().min(1),
+  colId: z.string().optional(),
+  sectionName: z.string().min(1),
+  vendorIndex: z.number().int().nonnegative().optional().default(0),
+  editType: z.enum(['value_change', 'status_change', 'label_change']),
+  oldDisplay: z.string().optional().default(''),
+  oldAmount: z.number().nullable().optional(),
+  oldStatus: z.string().nullable().optional(),
+  newDisplay: z.string().optional().default(''),
+  newAmount: z.number().nullable().optional(),
+  newStatus: z.string().nullable().optional(),
+  rowLabel: z.string().min(1),
+  reasonTag: z.string().nullable().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const sessionUser = await getSessionUser();
@@ -9,57 +33,47 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const {
-    analysisId,
-    projectId,
-    vendorName,
-    rowId,
-    sectionName,
-    vendorIndex,
-    editType,
-    oldDisplay,
-    oldAmount,
-    oldStatus,
-    newDisplay,
-    newAmount,
-    newStatus,
-    rowLabel,
-    reasonTag,
-  } = body;
-
-  // Validate required fields
-  if (!analysisId || !projectId || !vendorName || !rowId || !sectionName || !editType || !rowLabel) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  const parsed = learningEventSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
+      { status: 400 },
+    );
   }
 
-  // Validate editType
-  if (!['value_change', 'status_change', 'label_change'].includes(editType)) {
-    return NextResponse.json({ error: 'Invalid editType' }, { status: 400 });
-  }
+  const data = parsed.data;
 
   // Verify user has access to this analysis
-  const hasAccess = await requireAnalysisAccess(analysisId, sessionUser.id, sessionUser.role);
+  const hasAccess = await requireAnalysisAccess(data.analysisId, sessionUser.id, sessionUser.role);
   if (!hasAccess) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
+  // Derive stable identifiers
+  const vendorKey = toVendorKey(data.vendorName);
+  const colId = data.colId || `v${data.vendorIndex}`;
+  const cellId = `${data.analysisId}:${vendorKey}:${data.rowId}:${colId}`;
+
   const event = await prisma.learningEvent.create({
     data: {
-      analysisId,
-      projectId,
-      vendorName,
-      rowId,
-      sectionName,
-      vendorIndex: vendorIndex ?? 0,
-      editType,
-      oldDisplay: oldDisplay ?? '',
-      oldAmount: oldAmount ?? null,
-      oldStatus: oldStatus ?? null,
-      newDisplay: newDisplay ?? '',
-      newAmount: newAmount ?? null,
-      newStatus: newStatus ?? null,
-      rowLabel,
-      reasonTag: reasonTag ?? null,
+      analysisId: data.analysisId,
+      projectId: data.projectId,
+      vendorName: data.vendorName,
+      vendorKey,
+      rowId: data.rowId,
+      colId,
+      cellId,
+      sectionName: data.sectionName,
+      vendorIndex: data.vendorIndex,
+      editType: data.editType,
+      oldDisplay: data.oldDisplay,
+      oldAmount: data.oldAmount ?? null,
+      oldStatus: data.oldStatus ?? null,
+      newDisplay: data.newDisplay,
+      newAmount: data.newAmount ?? null,
+      newStatus: data.newStatus ?? null,
+      rowLabel: data.rowLabel,
+      reasonTag: data.reasonTag ?? null,
       userId: sessionUser.id,
     },
   });

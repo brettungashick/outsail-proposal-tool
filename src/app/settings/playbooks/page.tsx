@@ -30,7 +30,9 @@ interface Vendor {
 
 interface Suggestion {
   vendorName: string;
+  vendorKey: string;
   editType: string;
+  rowId: string;
   rowLabel: string;
   newDisplay: string;
   newStatus: string | null;
@@ -128,6 +130,18 @@ export default function PlaybooksSettingsPage() {
     }
   };
 
+  const handleDismissSuggestion = async (suggestion: Suggestion) => {
+    // Mark all example events as promoted with "dismissed" to suppress the suggestion
+    for (const eventId of suggestion.exampleEventIds) {
+      await fetch(`/api/learning-events/${eventId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ promotedToRuleId: 'dismissed' }),
+      });
+    }
+    fetchSuggestions();
+  };
+
   const handleApproveSuggestion = (suggestion: Suggestion) => {
     // Pre-fill the form from the suggestion
     const isStatusChange = suggestion.editType === 'status_change';
@@ -150,20 +164,30 @@ export default function PlaybooksSettingsPage() {
   };
 
   const buildActionValue = (): string => {
+    // The playbook engine does JSON.parse(actionValue) and expects:
+    //   set_status: a raw status string (e.g. "included")
+    //   add_note: a raw note string (e.g. "Some note")
     if (form.actionType === 'set_status') {
-      return JSON.stringify({ status: form.statusValue });
+      return JSON.stringify(form.statusValue);
     }
     if (form.actionType === 'add_note') {
-      return JSON.stringify({ note: form.noteValue });
+      return JSON.stringify(form.noteValue);
     }
-    return '{}';
+    return '""';
   };
 
   const parseActionValue = (actionType: string, actionValue: string) => {
     try {
       const parsed = JSON.parse(actionValue);
-      if (actionType === 'set_status') return { statusValue: parsed.status || 'included', noteValue: '' };
-      if (actionType === 'add_note') return { statusValue: 'included' as CellStatus, noteValue: parsed.note || '' };
+      // Handle both old format {"status":"..."} and new format "..."
+      if (actionType === 'set_status') {
+        const val = typeof parsed === 'object' ? parsed.status : parsed;
+        return { statusValue: (val || 'included') as CellStatus, noteValue: '' };
+      }
+      if (actionType === 'add_note') {
+        const val = typeof parsed === 'object' ? parsed.note : parsed;
+        return { statusValue: 'included' as CellStatus, noteValue: val || '' };
+      }
     } catch {
       // ignore
     }
@@ -259,12 +283,14 @@ export default function PlaybooksSettingsPage() {
     try {
       const parsed = JSON.parse(actionValue);
       if (actionType === 'set_status') {
-        const status = parsed.status as string;
+        // Handle both old format {"status":"..."} and new format "..."
+        const status = typeof parsed === 'object' ? parsed.status : parsed;
         const label = STATUS_OPTIONS.find((o) => o.value === status)?.label || status;
         return `Set status: ${label}`;
       }
       if (actionType === 'add_note') {
-        return `Add note: "${parsed.note}"`;
+        const note = typeof parsed === 'object' ? parsed.note : parsed;
+        return `Add note: "${note}"`;
       }
     } catch {
       // ignore
@@ -438,12 +464,18 @@ export default function PlaybooksSettingsPage() {
                           {s.count}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3 text-right space-x-2">
                         <button
                           onClick={() => handleApproveSuggestion(s)}
                           className="text-xs text-white bg-outsail-blue-dark px-3 py-1.5 rounded-lg hover:bg-outsail-navy transition"
                         >
                           Approve
+                        </button>
+                        <button
+                          onClick={() => handleDismissSuggestion(s)}
+                          className="text-xs text-slate-500 border border-slate-300 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition"
+                        >
+                          Dismiss
                         </button>
                       </td>
                     </tr>

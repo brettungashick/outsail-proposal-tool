@@ -38,19 +38,22 @@ model Project {
 }
 
 model Document {
-  id           String   @id @default(cuid())
-  projectId    String
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  vendorName   String
-  fileName     String
-  filePath     String
-  fileType     String
-  rawText      String?
-  parsedData   String?
-  documentType String   @default("initial_quote")
-  quoteVersion Int      @default(1)
-  isActive     Boolean  @default(true)
-  uploadedAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vendorName      String
+  fileName        String
+  filePath        String
+  fileType        String
+  fileSize        Int?     // bytes
+  rawText         String?
+  parsedData      String?
+  documentType    String   @default("initial_quote")
+  quoteVersion    Int      @default(1)
+  isActive        Boolean  @default(true)
+  ingestionStatus String   @default("uploaded") // uploaded | parsing | parsed | failed
+  ingestionError  String?
+  uploadedAt      DateTime @default(now())
 }
 
 model Analysis {
@@ -119,7 +122,10 @@ model LearningEvent {
   analysis         Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
   projectId        String
   vendorName       String
+  vendorKey        String?  // Stable vendor identifier (slug)
   rowId            String
+  colId            String?  // Stable column identifier
+  cellId           String?  // Derived: ${analysisId}:${vendorKey}:${rowId}:${colId}
   sectionName      String
   vendorIndex      Int
   editType         String   // value_change | status_change | label_change
@@ -139,6 +145,7 @@ model LearningEvent {
 model VendorPlaybookRule {
   id                 String   @id @default(cuid())
   vendorName         String   // Vendor.name or "*" for global
+  vendorKey          String?  // Stable vendor slug for matching
   name               String
   conditionType      String   // contains | regex
   conditionValue     String
