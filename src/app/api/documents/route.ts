@@ -10,12 +10,14 @@ export async function POST(req: NextRequest) {
   }
 
   const formData = await req.formData();
-  const file = formData.get('file') as File;
+  const file = formData.get('file') as File | null;
+  const pastedRawText = formData.get('rawText') as string | null;
   const vendorName = formData.get('vendorName') as string;
   const projectId = formData.get('projectId') as string;
   const documentType = (formData.get('documentType') as string) || 'initial_quote';
+  const fileName = (formData.get('fileName') as string) || '';
 
-  if (!file || !vendorName || !projectId) {
+  if ((!file && !pastedRawText) || !vendorName || !projectId) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
@@ -24,17 +26,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  const fileType = getFileType(file.name);
-
-  const bytes = await file.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-
   let rawText = '';
-  try {
-    rawText = await extractTextFromBuffer(buffer, fileType);
-  } catch (error) {
-    console.error('Text extraction error:', error);
-    rawText = 'Error extracting text from file';
+  let fileType = 'text';
+  let resolvedFileName = fileName;
+
+  if (pastedRawText) {
+    // Pasted text input — no file parsing needed
+    rawText = pastedRawText;
+    resolvedFileName = resolvedFileName || `${vendorName} - Pasted Content.txt`;
+  } else if (file) {
+    fileType = getFileType(file.name);
+    resolvedFileName = resolvedFileName || file.name;
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    try {
+      rawText = await extractTextFromBuffer(buffer, fileType);
+    } catch (error) {
+      console.error('Text extraction error:', error);
+      rawText = 'Error extracting text from file';
+    }
   }
 
   let quoteVersion = 1;
@@ -70,8 +80,8 @@ export async function POST(req: NextRequest) {
     data: {
       projectId,
       vendorName,
-      fileName: file.name,
-      filePath: file.name,
+      fileName: resolvedFileName,
+      filePath: resolvedFileName,
       fileType,
       rawText,
       documentType,
