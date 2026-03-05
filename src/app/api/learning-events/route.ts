@@ -7,6 +7,19 @@ function toVendorKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+// One-time migration: ensure new columns exist in Turso
+let _migrated = false;
+async function ensureLearningEventColumns() {
+  if (_migrated) return;
+  const addCol = async (col: string, def: string) => {
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "LearningEvent" ADD COLUMN "${col}" ${def}`); } catch { /* exists */ }
+  };
+  await addCol('vendorKey', 'TEXT');
+  await addCol('colId', 'TEXT');
+  await addCol('cellId', 'TEXT');
+  _migrated = true;
+}
+
 const learningEventSchema = z.object({
   analysisId: z.string().min(1),
   projectId: z.string().min(1),
@@ -27,6 +40,8 @@ const learningEventSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  await ensureLearningEventColumns();
+
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

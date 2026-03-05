@@ -6,6 +6,19 @@ import { extractTextFromBuffer, getFileType } from '@/lib/file-parser';
 // Configurable via env, default 15MB
 const MAX_FILE_SIZE = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '15', 10) * 1024 * 1024;
 
+// One-time migration: ensure new columns exist in Turso
+let _migrated = false;
+async function ensureDocumentColumns() {
+  if (_migrated) return;
+  const addCol = async (col: string, def: string) => {
+    try { await prisma.$executeRawUnsafe(`ALTER TABLE "Document" ADD COLUMN "${col}" ${def}`); } catch { /* exists */ }
+  };
+  await addCol('fileSize', 'INTEGER');
+  await addCol('ingestionStatus', "TEXT NOT NULL DEFAULT 'uploaded'");
+  await addCol('ingestionError', 'TEXT');
+  _migrated = true;
+}
+
 const ALLOWED_FILE_TYPES: Record<string, string[]> = {
   pdf: ['application/pdf'],
   xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
@@ -19,6 +32,8 @@ const ALLOWED_FILE_TYPES: Record<string, string[]> = {
 const ALLOWED_EXTENSIONS = Object.keys(ALLOWED_FILE_TYPES);
 
 export async function POST(req: NextRequest) {
+  await ensureDocumentColumns();
+
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

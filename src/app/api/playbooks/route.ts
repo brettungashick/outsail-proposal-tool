@@ -7,6 +7,14 @@ function toVendorKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+// One-time migration: ensure vendorKey column exists in Turso
+let _migrated = false;
+async function ensurePlaybookColumns() {
+  if (_migrated) return;
+  try { await prisma.$executeRawUnsafe(`ALTER TABLE "VendorPlaybookRule" ADD COLUMN "vendorKey" TEXT`); } catch { /* exists */ }
+  _migrated = true;
+}
+
 const playbookCreateSchema = z.object({
   vendorName: z.string().min(1),
   name: z.string().min(1),
@@ -47,6 +55,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  await ensurePlaybookColumns();
+
   const sessionUser = await getSessionUser();
   if (!sessionUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
