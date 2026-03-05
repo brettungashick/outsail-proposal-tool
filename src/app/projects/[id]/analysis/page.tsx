@@ -136,6 +136,7 @@ export default function AnalysisPage() {
       }
     }
     setLoading(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   useEffect(() => {

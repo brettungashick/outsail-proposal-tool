@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { parseProposal, generateClarifyingQuestions, generateComparison, isApiKeyConfigured } from '@/lib/claude';
+import { parseProposal, generateClarifyingQuestions, generateComparison } from '@/lib/claude';
 import { ParsedProposal } from '@/types';
 
 // Allow up to 5 minutes for background processing (Vercel Pro/Enterprise)

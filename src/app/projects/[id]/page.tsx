@@ -150,6 +150,7 @@ export default function ProjectPage() {
     pollProgress(); // Initial poll immediately
 
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.status, project?.analyses, fetchProject]);
 
   const handleDeleteDocument = async (docId: string) => {
