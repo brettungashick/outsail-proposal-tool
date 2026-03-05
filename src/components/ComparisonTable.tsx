@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles, HiddenRows, CellStatus } from '@/types';
 import EditableCell from './EditableCell';
 
@@ -26,6 +26,10 @@ interface ComparisonTableProps {
   onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
   onCellStatusChange?: (sectionIndex: number, rowIndex: number, vendorIndex: number, newStatus: CellStatus) => void;
   onAuditClick?: (sectionIndex: number, rowIndex: number, vendorIndex: number) => void;
+  onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
+  headcountGrowthY2?: number;
+  headcountGrowthY3?: number;
+  onHeadcountGrowthChange?: (year: 2 | 3, percent: number) => void;
 }
 
 const TOTALS_SECTION = 'Totals';
@@ -46,6 +50,10 @@ export default function ComparisonTable({
   onRowLabelEdit,
   onCellStatusChange,
   onAuditClick,
+  onRowReorder,
+  headcountGrowthY2,
+  headcountGrowthY3,
+  onHeadcountGrowthChange,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, { bg: string; text: string }> = {
     'Software Fees (Recurring)': { bg: 'bg-indigo-700', text: 'text-white' },
@@ -86,6 +94,37 @@ export default function ComparisonTable({
           );
         })}
       </div>
+
+      {/* Year 2/3 headcount growth controls */}
+      {onHeadcountGrowthChange && isEditable && (
+        <div className="flex items-center gap-4 mb-3 px-1 text-sm">
+          <span className="text-slate-500 text-xs font-medium">Headcount Growth:</span>
+          <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+            Year 2
+            <input
+              type="number"
+              value={headcountGrowthY2 ?? 0}
+              onChange={(e) => onHeadcountGrowthChange(2, parseFloat(e.target.value) || 0)}
+              className="w-16 px-1.5 py-1 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-indigo-400 outline-none"
+              step="1"
+              min="0"
+            />
+            %
+          </label>
+          <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+            Year 3
+            <input
+              type="number"
+              value={headcountGrowthY3 ?? 0}
+              onChange={(e) => onHeadcountGrowthChange(3, parseFloat(e.target.value) || 0)}
+              className="w-16 px-1.5 py-1 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-indigo-400 outline-none"
+              step="1"
+              min="0"
+            />
+            %
+          </label>
+        </div>
+      )}
 
       <table className="w-full border-collapse">
         <thead>
@@ -130,6 +169,7 @@ export default function ComparisonTable({
               onRowLabelEdit={onRowLabelEdit}
               onCellStatusChange={onCellStatusChange}
               onAuditClick={onAuditClick}
+              onRowReorder={onRowReorder}
             />
           ))}
         </tbody>
@@ -222,6 +262,7 @@ function SectionBlock({
   onRowLabelEdit,
   onCellStatusChange,
   onAuditClick,
+  onRowReorder,
 }: {
   section: TableSection;
   sectionIndex: number;
@@ -238,9 +279,12 @@ function SectionBlock({
   onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
   onCellStatusChange?: (si: number, ri: number, vi: number, newStatus: CellStatus) => void;
   onAuditClick?: (si: number, ri: number, vi: number) => void;
+  onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
   const isTotalsSection = section.name === TOTALS_SECTION;
+  const dragRowIdx = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   return (
     <>
@@ -265,26 +309,69 @@ function SectionBlock({
       </tr>
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
-        const isComputed = row.isSubtotal || isTotalsSection;
+        const isComputed = row.isSubtotal || row.isPepm || isTotalsSection;
         const canEditCell = isEditable && !isComputed;
         const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
         const isRowHidden = hiddenRows?.[row.id] === true;
+        const canDrag = isEditable && !row.isSubtotal && !isTotalsSection && !!onRowReorder;
 
         return (
           <tr
             key={row.id}
+            draggable={canDrag}
+            onDragStart={(e) => {
+              if (!canDrag) return;
+              dragRowIdx.current = rowIdx;
+              e.dataTransfer.effectAllowed = 'move';
+              (e.currentTarget as HTMLElement).style.opacity = '0.5';
+            }}
+            onDragEnd={(e) => {
+              (e.currentTarget as HTMLElement).style.opacity = '1';
+              dragRowIdx.current = null;
+              setDragOverIdx(null);
+            }}
+            onDragOver={(e) => {
+              if (dragRowIdx.current === null || row.isSubtotal) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dragOverIdx !== rowIdx) setDragOverIdx(rowIdx);
+            }}
+            onDragLeave={() => {
+              if (dragOverIdx === rowIdx) setDragOverIdx(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOverIdx(null);
+              if (dragRowIdx.current !== null && dragRowIdx.current !== rowIdx && !row.isSubtotal) {
+                onRowReorder?.(sectionIndex, dragRowIdx.current, rowIdx);
+              }
+              dragRowIdx.current = null;
+            }}
             className={`group ${
+              dragOverIdx === rowIdx ? 'border-t-2 border-t-indigo-400' : ''
+            } ${
               isRowHidden
                 ? 'opacity-40 bg-slate-50/50'
                 : row.isSubtotal
                   ? 'bg-slate-50 font-semibold'
-                  : isDiscountRow
-                    ? 'bg-amber-50/30'
-                    : 'hover:bg-slate-50/50'
+                  : row.isPepm
+                    ? 'bg-indigo-50/50 text-indigo-600 text-xs italic'
+                    : isDiscountRow
+                      ? 'bg-amber-50/30'
+                      : 'hover:bg-slate-50/50'
             } border-b border-slate-100`}
           >
             <td className="px-4 py-2.5 text-sm text-slate-700 border-r border-slate-100">
               <div className="flex items-center gap-2">
+                {canDrag && (
+                  <span className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-slate-400 flex-shrink-0">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="9" cy="5" r="1.5" /><circle cx="15" cy="5" r="1.5" />
+                      <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+                      <circle cx="9" cy="19" r="1.5" /><circle cx="15" cy="19" r="1.5" />
+                    </svg>
+                  </span>
+                )}
                 {canDelete && onDeleteRow && (
                   <button
                     onClick={() => onDeleteRow(sectionIndex, rowIdx)}

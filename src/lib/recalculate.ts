@@ -47,6 +47,7 @@ function sumDataRows(
 
   for (const row of section.rows) {
     if (row.isSubtotal) continue;
+    if ((row as { isPepm?: boolean }).isPepm) continue;
     if (hiddenRows[row.id]) continue;
     const val = row.values[vendorIndex];
     if (!val) continue;
@@ -146,12 +147,52 @@ export function recalculateTable(
       if (!row.isSubtotal) continue;
       // Build formula from contributing row IDs
       const contributingIds = section.rows
-        .filter(r => !r.isSubtotal && !hiddenRows[r.id])
+        .filter(r => !r.isSubtotal && !(r as { isPepm?: boolean }).isPepm && !hiddenRows[r.id])
         .map(r => r.id);
       const formula = `SUM(${contributingIds.join(', ')})`;
       for (let vi = 0; vi < vendorCount; vi++) {
         const r = sumDataRows(section, vi, hiddenRows);
         row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
+      }
+    }
+  }
+
+  // Step 1b: Ensure an "Effective PEPM" row exists right after the software subtotal
+  if (result.normalizedHeadcount > 0) {
+    const swSection = result.sections.find((s) => s.name === SOFTWARE_SECTION);
+    if (swSection) {
+      const subtotalIdx = swSection.rows.findIndex((r) => r.isSubtotal);
+      const pepmIdx = swSection.rows.findIndex((r) => r.id === 'effective_pepm');
+
+      // Build PEPM values from software subtotal
+      const pepmValues: VendorValue[] = [];
+      for (let vi = 0; vi < vendorCount; vi++) {
+        const swResult = sumDataRows(swSection, vi, hiddenRows);
+        const pepm = swResult.sum / 12 / result.normalizedHeadcount;
+        const existing = pepmIdx >= 0 ? swSection.rows[pepmIdx].values[vi] : {
+          amount: null, display: '', note: null, citation: null, isConfirmed: true,
+        };
+        pepmValues.push({
+          ...existing,
+          amount: Math.round(pepm * 100) / 100,
+          display: formatCurrency(Math.round(pepm * 100) / 100),
+          isConfirmed: !swResult.hasTbc,
+          note: swResult.hasTbc ? 'Based on unconfirmed subtotal' : null,
+        });
+      }
+
+      if (pepmIdx >= 0) {
+        swSection.rows[pepmIdx].values = pepmValues;
+      } else {
+        const pepmRow = {
+          id: 'effective_pepm',
+          label: 'Effective PEPM',
+          values: pepmValues,
+          isSubtotal: false,
+          isPepm: true,
+        };
+        const insertAt = subtotalIdx >= 0 ? subtotalIdx + 1 : swSection.rows.length;
+        swSection.rows.splice(insertAt, 0, pepmRow);
       }
     }
   }
@@ -190,11 +231,24 @@ export function recalculateTable(
     const y1BeforeResult = addResults(softwareResult, implResult, serviceResult);
     const y1Result = addResults(y1BeforeResult, discountResult);
 
-    // Year 2 = Software + Service + recurring discounts (no implementation)
-    const y2Result = addResults(softwareResult, serviceResult, discountResult);
+    // Year 2 = (Software + Service) * (1 + growthY2%) + recurring discounts
+    const growthY2 = (result.headcountGrowthY2 || 0) / 100;
+    const growthY3 = (result.headcountGrowthY3 || 0) / 100;
 
-    // Year 3 = same as Year 2
-    const y3Result = y2Result;
+    const scaleResult = (r: SumResult, factor: number): SumResult => ({
+      sum: Math.round(r.sum * (1 + factor)),
+      hasTbc: r.hasTbc,
+      tbcCount: r.tbcCount,
+    });
+
+    const y2SoftwareResult = scaleResult(softwareResult, growthY2);
+    const y2ServiceResult = scaleResult(serviceResult, growthY2);
+    const y2Result = addResults(y2SoftwareResult, y2ServiceResult, discountResult);
+
+    // Year 3 = (Software + Service) * (1 + growthY3%) + recurring discounts
+    const y3SoftwareResult = scaleResult(softwareResult, growthY3);
+    const y3ServiceResult = scaleResult(serviceResult, growthY3);
+    const y3Result = addResults(y3SoftwareResult, y3ServiceResult, discountResult);
 
     const total3yrResult = addResults(y1Result, y2Result, y3Result);
 
@@ -202,8 +256,8 @@ export function recalculateTable(
       year1_before_discounts: { result: y1BeforeResult, formula: 'software_subtotal + impl_total + service_total' },
       year1_discounts: { result: discountResult, formula: 'SUM(enabled_discounts)' },
       year1: { result: y1Result, formula: 'year1_before_discounts + year1_discounts' },
-      year2: { result: y2Result, formula: 'software_subtotal + service_total + year1_discounts' },
-      year3: { result: y3Result, formula: 'software_subtotal + service_total + year1_discounts' },
+      year2: { result: y2Result, formula: `(software + service)×${(1 + growthY2).toFixed(2)} + discounts` },
+      year3: { result: y3Result, formula: `(software + service)×${(1 + growthY3).toFixed(2)} + discounts` },
       total3yr: { result: total3yrResult, formula: 'year1 + year2 + year3' },
     };
 

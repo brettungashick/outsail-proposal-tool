@@ -28,10 +28,8 @@ export async function GET(req: NextRequest) {
   const cutoffDate = new Date();
   cutoffDate.setMonth(cutoffDate.getMonth() - months);
 
-  // Non-admins only see their own projects in benchmarks
-  const ownerFilter = sessionUser.role === 'admin'
-    ? {}
-    : { advisorId: sessionUser.id };
+  // All advisors can see benchmarks from all completed projects
+  const ownerFilter = {};
 
   const projects = await prisma.project.findMany({
     where: {
@@ -69,7 +67,7 @@ export async function GET(req: NextRequest) {
 
       if (filterVendorNames.length > 0) {
         const hasMatch = vendors.some((v) =>
-          filterVendorNames.some((fv) => v.toLowerCase().includes(fv))
+          filterVendorNames.some((fv) => v.toLowerCase() === fv)
         );
         if (!hasMatch) return null;
       }

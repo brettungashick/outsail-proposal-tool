@@ -49,6 +49,7 @@ export interface TableRow {
   values: VendorValue[];
   isSubtotal?: boolean;
   isDiscount?: boolean;
+  isPepm?: boolean;
 }
 
 export interface TableSection {
@@ -62,6 +63,8 @@ export interface ComparisonTable {
   normalizedHeadcount: number;
   sections: TableSection[];
   auditLog?: CellAuditEvent[];
+  headcountGrowthY2?: number; // percentage, e.g. 5 for 5%
+  headcountGrowthY3?: number;
 }
 
 export interface Citation {

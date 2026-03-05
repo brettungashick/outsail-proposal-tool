@@ -11,11 +11,11 @@ export async function GET(req: NextRequest) {
   const scope = req.nextUrl.searchParams.get('scope') || 'mine';
 
   let whereClause = {};
-  if ((scope === 'team' || scope === 'all') && sessionUser.role === 'admin') {
-    // Admins can see all projects
-    whereClause = {};
+  if (scope === 'team' || scope === 'all') {
+    // All advisors can see team projects (excluding their own for 'team' scope)
+    whereClause = scope === 'team' ? { advisorId: { not: sessionUser.id } } : {};
   } else {
-    // Non-admins only see their own projects
+    // 'mine' scope — only own projects
     whereClause = { advisorId: sessionUser.id };
   }
 

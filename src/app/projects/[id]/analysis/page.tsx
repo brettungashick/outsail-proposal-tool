@@ -301,9 +301,12 @@ export default function AnalysisPage() {
     const oldAmount = val.amount;
     const oldStatus = val.status;
 
-    applyOverride(val, updated, sectionIndex, rowIndex, vendorIndex, newDisplayValue, newAmount);
+    // Auto-format numeric input as currency
+    const displayFormatted = newAmount !== null ? formatCurrency(newAmount) : newDisplayValue;
 
-    val.display = newDisplayValue;
+    applyOverride(val, updated, sectionIndex, rowIndex, vendorIndex, displayFormatted, newAmount);
+
+    val.display = displayFormatted;
     val.amount = newAmount;
     val.status = newAmount !== null ? 'currency' : deriveStatusFromDisplay(newDisplayValue);
     val.isConfirmed = val.status !== 'tbc';
@@ -326,7 +329,7 @@ export default function AnalysisPage() {
       oldDisplay,
       oldAmount,
       oldStatus,
-      newDisplay: newDisplayValue,
+      newDisplay: displayFormatted,
       newAmount,
       newStatus: val.status,
       rowLabel: row.label,
@@ -498,6 +501,36 @@ export default function AnalysisPage() {
         rowLabel: trimmed,
       });
     }
+  };
+
+  const handleHeadcountGrowthChange = (year: 2 | 3, percent: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated: ComparisonTableType = structuredClone(comparisonData);
+    if (year === 2) {
+      updated.headcountGrowthY2 = percent;
+    } else {
+      updated.headcountGrowthY3 = percent;
+    }
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
+  };
+
+  const handleRowReorder = (sectionIndex: number, fromIndex: number, toIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated: ComparisonTableType = structuredClone(comparisonData);
+    const rows = updated.sections[sectionIndex].rows;
+    const [moved] = rows.splice(fromIndex, 1);
+    rows.splice(toIndex, 0, moved);
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(analysis.id, newJson, analysis.comparisonData);
   };
 
   const handleToggleHidden = (rowId: string) => {
@@ -729,6 +762,10 @@ export default function AnalysisPage() {
                 onHeadcountChange={canEdit ? handleHeadcountChange : undefined}
                 onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
                 onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
+                onRowReorder={canEdit ? handleRowReorder : undefined}
+                headcountGrowthY2={comparisonData.headcountGrowthY2 ?? 0}
+                headcountGrowthY3={comparisonData.headcountGrowthY3 ?? 0}
+                onHeadcountGrowthChange={canEdit ? handleHeadcountGrowthChange : undefined}
                 onAuditClick={(si, ri, vi) => setAuditDrawer({ si, ri, vi })}
               />
             </div>
