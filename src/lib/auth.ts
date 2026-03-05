@@ -2,6 +2,7 @@ import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
+import { checkRateLimit, recordFailedLogin, clearFailedLogins, isAccountLocked } from './rate-limit';
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -14,14 +15,31 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
+        const email = credentials.email.toLowerCase().trim();
+
+        // Rate limit: 5 login attempts per email per 15 minutes
+        const rl = checkRateLimit({ key: `login:${email}`, limit: 5, windowMs: 15 * 60 * 1000 });
+        if (!rl.success) return null;
+
+        // Account lockout check
+        if (isAccountLocked(`lockout:${email}`)) return null;
+
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email.toLowerCase().trim() },
+          where: { email },
         });
 
-        if (!user) return null;
+        if (!user) {
+          recordFailedLogin(`lockout:${email}`);
+          return null;
+        }
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
-        if (!isValid) return null;
+        if (!isValid) {
+          recordFailedLogin(`lockout:${email}`);
+          return null;
+        }
+
+        clearFailedLogins(`lockout:${email}`);
 
         return {
           id: user.id,

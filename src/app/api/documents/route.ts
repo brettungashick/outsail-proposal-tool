@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, requireProjectAccess } from '@/lib/access';
 import { extractTextFromBuffer, getFileType } from '@/lib/file-parser';
+import { checkRateLimit } from '@/lib/rate-limit';
+import { documentUploadSchema, validateBody } from '@/lib/schemas';
 
 // Configurable via env, default 15MB
 const MAX_FILE_SIZE = parseInt(process.env.MAX_UPLOAD_SIZE_MB || '15', 10) * 1024 * 1024;
@@ -39,16 +41,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Rate limit: 20 uploads per user per hour
+  const rl = checkRateLimit({ key: `upload:${sessionUser.id}`, limit: 20, windowMs: 60 * 60 * 1000 });
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: 'Upload rate limit exceeded. Please try again later.' },
+      { status: 429, headers: { 'Retry-After': String(Math.ceil(rl.retryAfterMs / 1000)) } }
+    );
+  }
+
   const formData = await req.formData();
   const file = formData.get('file') as File | null;
   const pastedRawText = formData.get('rawText') as string | null;
-  const vendorName = formData.get('vendorName') as string;
-  const projectId = formData.get('projectId') as string;
-  const documentType = (formData.get('documentType') as string) || 'initial_quote';
-  const fileName = (formData.get('fileName') as string) || '';
 
-  if ((!file && !pastedRawText) || !vendorName || !projectId) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  const validated = validateBody(documentUploadSchema, {
+    vendorName: formData.get('vendorName') || '',
+    projectId: formData.get('projectId') || '',
+    documentType: formData.get('documentType') || undefined,
+    fileName: formData.get('fileName') || undefined,
+  });
+  if (!validated.success) return validated.response;
+
+  const { vendorName, projectId, documentType, fileName } = validated.data;
+
+  if (!file && !pastedRawText) {
+    return NextResponse.json({ error: 'A file or pasted text is required' }, { status: 400 });
   }
 
   const hasAccess = await requireProjectAccess(projectId, sessionUser.id, sessionUser.role);

@@ -17,7 +17,7 @@ const MESSAGES = [
   { text: 'Giving each proposal a fair, unbiased reading...', icon: '⚖️' },
 ];
 
-export default function AnalysisLoadingOverlay() {
+export default function AnalysisLoadingOverlay({ statusMessage }: { statusMessage?: string }) {
   const [messageIndex, setMessageIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [fade, setFade] = useState(true);
@@ -74,6 +74,13 @@ export default function AnalysisLoadingOverlay() {
             style={{ width: `${progress}%` }}
           />
         </div>
+
+        {/* Server status message */}
+        {statusMessage && (
+          <div className="mb-4">
+            <p className="text-xs text-outsail-blue-dark font-medium">{statusMessage}</p>
+          </div>
+        )}
 
         {/* Rotating message */}
         <div

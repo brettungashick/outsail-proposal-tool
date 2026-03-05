@@ -22,11 +22,19 @@ interface Document {
   isActive?: boolean;
 }
 
+interface AnalysisProgress {
+  stage: string;
+  vendorsParsed?: number;
+  totalVendors?: number;
+  message?: string;
+}
+
 interface Analysis {
   id: string;
   version: number;
   status?: string;
   clarifyingQuestions?: string | null;
+  analysisProgress?: string | null;
   createdAt: string;
 }
 
@@ -65,6 +73,7 @@ export default function ProjectPage() {
   const [analyzeError, setAnalyzeError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [progressMessage, setProgressMessage] = useState('');
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -89,6 +98,59 @@ export default function ProjectPage() {
   useEffect(() => {
     if (authStatus === 'authenticated') fetchProject();
   }, [authStatus, fetchProject]);
+
+  // Poll for analysis progress when project is analyzing
+  useEffect(() => {
+    if (!project || project.status !== 'analyzing') {
+      setProgressMessage('');
+      return;
+    }
+
+    const latestAnalysis = project.analyses[0];
+    if (!latestAnalysis) return;
+
+    const pollProgress = async () => {
+      try {
+        const res = await fetch(`/api/analysis/${latestAnalysis.id}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Parse progress
+        if (data.analysisProgress) {
+          try {
+            const progress: AnalysisProgress = JSON.parse(data.analysisProgress);
+            setProgressMessage(progress.message || '');
+
+            if (progress.stage === 'error') {
+              setAnalyzeError(progress.message || 'Analysis failed');
+              setAnalyzing(false);
+              fetchProject();
+              return;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+
+        // Check if status changed
+        if (data.status === 'complete') {
+          setAnalyzing(false);
+          fetchProject();
+          router.push(`/projects/${projectId}/analysis`);
+        } else if (data.status === 'clarifying') {
+          setAnalyzing(false);
+          fetchProject();
+        } else if (data.status === 'failed') {
+          setAnalyzing(false);
+          fetchProject();
+        }
+      } catch { /* network error, will retry */ }
+    };
+
+    setAnalyzing(true);
+    const interval = setInterval(pollProgress, 3000);
+    pollProgress(); // Initial poll immediately
+
+    return () => clearInterval(interval);
+  }, [project?.status, project?.analyses, fetchProject]);
 
   const handleDeleteDocument = async (docId: string) => {
     await fetch(`/api/documents/${docId}`, { method: 'DELETE' });
@@ -117,18 +179,18 @@ export default function ProjectPage() {
         const data = await res.json();
         throw new Error(data.error || 'Analysis failed');
       }
+      // 202 returned — polling effect will pick up progress
       await fetchProject();
-      setActiveTab('analysis');
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed');
-    } finally {
       setAnalyzing(false);
     }
   };
 
   const handleFinalized = () => {
+    // Refresh project data — polling will show the loading overlay
+    // and redirect to analysis page once complete
     fetchProject();
-    router.push(`/projects/${projectId}/analysis`);
   };
 
   const handleDeleteProject = async () => {
@@ -168,12 +230,14 @@ export default function ProjectPage() {
 
   const latestAnalysis = project.analyses[0] || null;
   const isClarifying = latestAnalysis?.status === 'clarifying';
-  const isComplete = latestAnalysis && latestAnalysis.status !== 'clarifying';
+  const isProcessing = latestAnalysis?.status === 'draft' || latestAnalysis?.status === 'finalizing';
+  const isComplete = latestAnalysis?.status === 'complete';
+  const isFailed = latestAnalysis?.status === 'failed';
   const canEdit = project.isOwner || project.isAdmin;
 
   return (
     <Sidebar>
-      {analyzing && <AnalysisLoadingOverlay />}
+      {(analyzing || isProcessing) && <AnalysisLoadingOverlay statusMessage={progressMessage} />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
@@ -202,7 +266,7 @@ export default function ProjectPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              {canEdit && project.documents.length >= 2 && !isClarifying && (
+              {canEdit && project.documents.length >= 2 && !isClarifying && !isProcessing && (
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}
@@ -310,6 +374,17 @@ export default function ProjectPage() {
                 onDocumentsChanged={fetchProject}
                 readOnly={!canEdit}
               />
+            ) : isFailed ? (
+              <div className="text-center py-16">
+                <p className="text-red-500 mb-4">Analysis failed. Please try again.</p>
+                <button
+                  onClick={handleAnalyze}
+                  disabled={analyzing}
+                  className="bg-outsail-blue-dark text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
+                >
+                  Retry Analysis
+                </button>
+              </div>
             ) : isComplete ? (
               <div className="bg-white rounded-xl border border-slate-200 p-6">
                 <div className="flex justify-between items-center mb-4">

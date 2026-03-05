@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, requireShareAccess } from '@/lib/access';
+import { hashToken } from '@/lib/token-hash';
 
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
   const sessionUser = await getSessionUser();
@@ -8,7 +9,8 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
     return NextResponse.json({ error: 'Authentication required', code: 'AUTH_REQUIRED' }, { status: 401 });
   }
 
-  const { allowed, reason } = await requireShareAccess(params.token, sessionUser);
+  const tokenHash = hashToken(params.token);
+  const { allowed, reason } = await requireShareAccess(tokenHash, sessionUser);
   if (!allowed) {
     const status = reason === 'Invalid share link' ? 404
       : reason === 'Share link has expired' ? 410
@@ -17,7 +19,7 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
   }
 
   const shareLink = await prisma.shareLink.findUnique({
-    where: { token: params.token },
+    where: { token: tokenHash },
     include: {
       project: {
         include: {

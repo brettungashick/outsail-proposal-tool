@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { hashToken } from '@/lib/token-hash';
 
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
+  const tokenHash = hashToken(params.token);
   const user = await prisma.user.findUnique({
-    where: { inviteToken: params.token },
+    where: { inviteToken: tokenHash },
     select: { id: true, email: true, name: true, inviteStatus: true },
   });
 
@@ -23,8 +25,9 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
   }
 
+  const tokenHash = hashToken(params.token);
   const user = await prisma.user.findUnique({
-    where: { inviteToken: params.token },
+    where: { inviteToken: tokenHash },
   });
 
   if (!user || user.inviteStatus !== 'pending') {

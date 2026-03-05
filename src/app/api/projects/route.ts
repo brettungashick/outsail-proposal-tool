@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/access';
+import { projectCreateSchema, validateBody } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
   const sessionUser = await getSessionUser();
@@ -40,17 +41,19 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
+  const validated = validateBody(projectCreateSchema, body);
+  if (!validated.success) return validated.response;
 
   const now = new Date();
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
-  const autoName = `${body.clientName} ${monthNames[now.getMonth()]} ${String(now.getFullYear()).slice(-2)}`;
+  const autoName = `${validated.data.clientName} ${monthNames[now.getMonth()]} ${String(now.getFullYear()).slice(-2)}`;
 
   const project = await prisma.project.create({
     data: {
       name: autoName,
-      clientName: body.clientName,
-      clientEmail: body.clientEmail || null,
+      clientName: validated.data.clientName,
+      clientEmail: validated.data.clientEmail || null,
       advisorId: sessionUser.id,
     },
   });

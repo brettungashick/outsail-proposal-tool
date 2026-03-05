@@ -63,11 +63,9 @@ export function augmentAuditData(
             charOffsetEnd: -1,
           };
 
-          // Try to find the excerpt in the document text
-          // We don't have the full raw text here, so offsets stay -1
-          // The excerpt itself serves as a reference
+          // Use the actual document name as the label for more specificity
           if (val.citation.excerpt) {
-            pointer.label = `${vendorName} Proposal`;
+            pointer.label = val.citation.documentName || `${vendorName} Proposal`;
           }
 
           val.audit.sources = [pointer];

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { CellStatus, CellAudit } from '@/types';
+import { CellStatus, CellAudit, Citation } from '@/types';
 import CellAuditTooltip from './CellAuditTooltip';
 
 const STATUS_OPTIONS: { value: CellStatus; label: string }[] = [
@@ -21,6 +21,7 @@ interface EditableCellProps {
   note: string | null;
   status?: CellStatus;
   audit?: CellAudit;
+  citation?: Citation | null;
   onSave: (newDisplay: string, newAmount: number | null) => void;
   onStatusChange?: (status: CellStatus) => void;
   onAuditClick?: () => void;
@@ -34,6 +35,7 @@ export default function EditableCell({
   note,
   status,
   audit,
+  citation,
   onSave,
   onStatusChange,
   onAuditClick,
@@ -222,7 +224,7 @@ export default function EditableCell({
                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
               </svg>
             </button>
-            {showTooltip && <CellAuditTooltip audit={audit} />}
+            {showTooltip && <CellAuditTooltip audit={audit} citation={citation} />}
           </span>
         )}
       </div>

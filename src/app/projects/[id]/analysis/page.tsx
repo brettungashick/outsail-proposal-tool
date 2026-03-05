@@ -96,8 +96,9 @@ export default function AnalysisPage() {
     setIsOwner(proj.isOwner);
     setIsAdmin(proj.isAdmin);
     const latestAnalysis = proj.analyses?.[0];
-    // If the latest analysis is still in clarifying state, redirect to project page
-    if (latestAnalysis?.status === 'clarifying' && !analysisId) {
+    // If the latest analysis is still in progress, redirect to project page
+    const inProgressStatuses = ['clarifying', 'draft', 'finalizing'];
+    if (inProgressStatuses.includes(latestAnalysis?.status) && !analysisId) {
       router.push(`/projects/${projectId}`);
       return;
     }
@@ -112,7 +113,7 @@ export default function AnalysisPage() {
     if (res.ok) {
       const data = await res.json();
       // Double-check status from full analysis data
-      if (data.status === 'clarifying') {
+      if (['clarifying', 'draft', 'finalizing'].includes(data.status)) {
         router.push(`/projects/${projectId}`);
         return;
       }

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { prisma } from '@/lib/prisma';
+import { hashToken } from '@/lib/token-hash';
 import { getSessionUser, requireProjectAccess, emailDomain, getAppBaseUrl } from '@/lib/access';
 import { sendShareEmail } from '@/lib/email';
+import { shareCreateSchema, validateBody } from '@/lib/schemas';
 
 // One-time migration: ensure ShareLink columns exist in Turso
 let _migrated = false;
@@ -26,11 +28,10 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { projectId, email } = body;
+    const validated = validateBody(shareCreateSchema, body);
+    if (!validated.success) return validated.response;
 
-    if (!email) {
-      return NextResponse.json({ error: 'Recipient email is required' }, { status: 400 });
-    }
+    const { projectId, email } = validated.data;
 
     const hasAccess = await requireProjectAccess(projectId, sessionUser.id, sessionUser.role);
     if (!hasAccess) {
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     const shareLink = await prisma.shareLink.create({
       data: {
         projectId,
-        token,
+        token: hashToken(token),
         email: email.toLowerCase().trim(),
         allowedDomain,
         accessMode: 'domain',

@@ -445,6 +445,7 @@ function SectionBlock({
                     note={val.note}
                     status={val.status}
                     audit={val.audit}
+                    citation={val.citation}
                     onSave={(newDisplay, newAmount) =>
                       onCellEdit(sectionIndex, rowIdx, vendorIdx, newDisplay, newAmount)
                     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/access';
+import { vendorCreateSchema, validateBody } from '@/lib/schemas';
 
 export async function GET() {
   const sessionUser = await getSessionUser();
@@ -26,16 +27,15 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { name, logoUrl, accentColor } = body;
+  const validated = validateBody(vendorCreateSchema, body);
+  if (!validated.success) return validated.response;
 
-  if (!name?.trim()) {
-    return NextResponse.json({ error: 'Vendor name is required' }, { status: 400 });
-  }
+  const { name, logoUrl, accentColor } = validated.data;
 
   try {
     const vendor = await prisma.vendor.create({
       data: {
-        name: name.trim(),
+        name,
         logoUrl: logoUrl || null,
         accentColor: accentColor || null,
       },

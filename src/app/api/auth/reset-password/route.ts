@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { hashToken } from '@/lib/token-hash';
+import { resetPasswordSchema, validateBody } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
   try {
@@ -9,8 +11,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Token is required' }, { status: 400 });
     }
 
+    const tokenHash = hashToken(token);
     const user = await prisma.user.findUnique({
-      where: { passwordResetToken: token },
+      where: { passwordResetToken: tokenHash },
       select: { id: true, email: true, name: true, passwordResetExpires: true },
     });
 
@@ -27,14 +30,15 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { token, password } = await req.json();
+    const body = await req.json();
+    const validated = validateBody(resetPasswordSchema, body);
+    if (!validated.success) return validated.response;
 
-    if (!token || !password || password.length < 8) {
-      return NextResponse.json({ error: 'Token and password (8+ characters) are required' }, { status: 400 });
-    }
+    const { token, password } = validated.data;
 
+    const tokenHash = hashToken(token);
     const user = await prisma.user.findUnique({
-      where: { passwordResetToken: token },
+      where: { passwordResetToken: tokenHash },
     });
 
     if (!user || !user.passwordResetExpires || user.passwordResetExpires < new Date()) {
