@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import { authOptions } from '@/lib/auth';
+import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
@@ -11,12 +11,13 @@ export async function POST(req: NextRequest) {
   }
 
   const userId = (session.user as { id: string }).id;
+  const userRole = (session.user as { role?: string }).role;
   const body = await req.json();
   const { projectId, email } = body;
 
-  // Verify project belongs to user
+  // Verify project belongs to user or user is admin
   const project = await prisma.project.findFirst({
-    where: { id: projectId, advisorId: userId },
+    where: projectWhereOwnerOrAdmin(projectId, userId, userRole),
   });
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
