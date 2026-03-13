@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -41,10 +41,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 
   const userId = (session.user as { id: string }).id;
+  const userRole = (session.user as { role?: string }).role;
   const body = await req.json();
 
   const project = await prisma.project.updateMany({
-    where: { id: params.id, advisorId: userId },
+    where: projectWhereOwnerOrAdmin(params.id, userId, userRole),
     data: {
       name: body.name,
       clientName: body.clientName,
@@ -67,9 +68,10 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
   }
 
   const userId = (session.user as { id: string }).id;
+  const userRole = (session.user as { role?: string }).role;
 
   const project = await prisma.project.findFirst({
-    where: { id: params.id, advisorId: userId },
+    where: projectWhereOwnerOrAdmin(params.id, userId, userRole),
   });
 
   if (!project) {
