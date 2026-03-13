@@ -31,6 +31,8 @@ export default function DashboardPage() {
   const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState<SortBy>('date_desc');
+  const [mineError, setMineError] = useState(false);
+  const [teamError, setTeamError] = useState(false);
 
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login');
@@ -41,12 +43,27 @@ export default function DashboardPage() {
   }, [status]);
 
   const fetchProjects = async () => {
-    const [mineRes, teamRes] = await Promise.all([
-      fetch('/api/projects?scope=mine'),
-      fetch('/api/projects?scope=team'),
-    ]);
-    if (mineRes.ok) setMyProjects(await mineRes.json());
-    if (teamRes.ok) setTeamProjects(await teamRes.json());
+    setMineError(false);
+    setTeamError(false);
+    try {
+      const [mineRes, teamRes] = await Promise.all([
+        fetch('/api/projects?scope=mine'),
+        fetch('/api/projects?scope=team'),
+      ]);
+      if (mineRes.ok) {
+        setMyProjects(await mineRes.json());
+      } else {
+        setMineError(true);
+      }
+      if (teamRes.ok) {
+        setTeamProjects(await teamRes.json());
+      } else {
+        setTeamError(true);
+      }
+    } catch {
+      setMineError(true);
+      setTeamError(true);
+    }
     setLoading(false);
   };
 
@@ -146,10 +163,39 @@ export default function DashboardPage() {
           </select>
         </div>
 
+        {/* Filtered count */}
+        {search.trim() && (
+          <div className="flex items-center gap-2 mb-4 text-sm text-slate-500">
+            <span>
+              Showing {filteredMine.length + filteredTeam.length} of{' '}
+              {myProjects.length + teamProjects.length} projects
+            </span>
+            <button
+              onClick={() => setSearch('')}
+              className="text-blue-600 hover:text-blue-800 font-medium"
+            >
+              Clear search
+            </button>
+          </div>
+        )}
+
         {/* My Projects */}
         <div className="mb-10">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">My Projects</h2>
-          {filteredMine.length === 0 ? (
+          {mineError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+              <span className="text-sm text-red-700">
+                Could not load your projects. Your recent projects may not be shown.
+              </span>
+              <button
+                onClick={fetchProjects}
+                className="text-sm font-medium text-red-700 underline hover:text-red-900"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {filteredMine.length === 0 && !mineError ? (
             <div className="text-center py-12 bg-white rounded-xl border border-slate-200">
               <div className="text-slate-400 text-lg mb-2">
                 {search ? 'No matching projects' : 'No projects yet'}
@@ -168,21 +214,38 @@ export default function DashboardPage() {
         </div>
 
         {/* Team Projects */}
-        {filteredTeam.length > 0 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">
-              Team Projects
-              <span className="text-sm font-normal text-slate-400 ml-2">
-                {userRole === 'admin' ? 'Full access' : 'View only'}
-              </span>
-            </h2>
+        <div>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">
+            Team Projects
+            <span className="text-sm font-normal text-slate-400 ml-2">
+              {userRole === 'admin' ? 'Full access' : 'View only'}
+            </span>
+          </h2>
+          {teamError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+              <span className="text-sm text-red-700">Could not load team projects.</span>
+              <button
+                onClick={fetchProjects}
+                className="text-sm font-medium text-red-700 underline hover:text-red-900"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {filteredTeam.length === 0 && !teamError ? (
+            <div className="text-center py-8 bg-white rounded-xl border border-slate-200">
+              <div className="text-slate-400 text-sm">
+                {search ? 'No matching team projects' : 'No team projects'}
+              </div>
+            </div>
+          ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredTeam.map((project) => (
                 <ProjectCard key={project.id} project={project} showAdvisor />
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Create Project Modal */}
         {showModal && (
