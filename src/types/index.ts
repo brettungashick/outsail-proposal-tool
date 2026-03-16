@@ -4,6 +4,7 @@ export interface VendorValue {
   note: string | null;
   citation: Citation | null;
   isConfirmed: boolean;
+  isManualOverride?: boolean;
 }
 
 export interface TableRow {

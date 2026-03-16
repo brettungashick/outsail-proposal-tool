@@ -25,6 +25,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
   const [dragActive, setDragActive] = useState(false);
   const [vendors, setVendors] = useState<VendorOption[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -66,6 +67,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
 
     setUploading(true);
     setError('');
+    setWarning('');
 
     const formData = new FormData();
     formData.append('file', file);
@@ -78,6 +80,10 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || 'Upload failed');
+      }
+      const data = await res.json();
+      if (data.extractionWarning) {
+        setWarning(data.extractionWarning);
       }
       setVendorName('');
       setDocumentType('initial_quote');
@@ -190,6 +196,7 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
       </div>
 
       {error && <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</div>}
+      {warning && <div className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded-lg">{warning}</div>}
 
       <button
         type="submit"

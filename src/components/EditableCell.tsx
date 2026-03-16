@@ -7,6 +7,7 @@ interface EditableCellProps {
   isEditable: boolean;
   isConfirmed: boolean;
   note: string | null;
+  isOverride?: boolean;
   onSave: (newValue: string) => void;
 }
 
@@ -15,6 +16,7 @@ export default function EditableCell({
   isEditable,
   isConfirmed,
   note,
+  isOverride,
   onSave,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
@@ -77,7 +79,12 @@ export default function EditableCell({
     >
       <div className="flex items-center gap-1">
         <span className={!isConfirmed ? 'text-amber-700' : 'text-slate-900'}>{value}</span>
-        {note && (
+        {isOverride && (
+          <span className="text-xs text-blue-500 ml-1" title="Manually overridden">
+            &#9998;
+          </span>
+        )}
+        {note && !isOverride && (
           <span className="text-xs text-amber-500 ml-1" title={note}>
             *
           </span>

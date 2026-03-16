@@ -160,9 +160,10 @@ function SectionBlock({
                 >
                   <EditableCell
                     value={val.display}
-                    isEditable={isEditable && !row.isSubtotal}
+                    isEditable={isEditable}
                     isConfirmed={val.isConfirmed}
                     note={val.note}
+                    isOverride={val.isManualOverride}
                     onSave={(newVal) => onCellEdit(sectionIndex, rowIdx, vendorIdx, newVal)}
                   />
                 </td>

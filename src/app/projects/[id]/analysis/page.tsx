@@ -10,6 +10,7 @@ import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
 import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
+import { recalculateTotals } from '@/lib/recalculate-totals';
 
 interface AnalysisData {
   id: string;
@@ -125,10 +126,16 @@ export default function AnalysisPage() {
 
     const oldDisplay = val.display;
     val.display = newDisplayValue;
+    val.isConfirmed = true;
 
     const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
     if (!isNaN(numVal)) {
       val.amount = numVal;
+    }
+
+    // Mark subtotal/total rows as manual overrides so recalculation skips them
+    if (row.isSubtotal) {
+      val.isManualOverride = true;
     }
 
     row.values = [...row.values];
@@ -138,7 +145,10 @@ export default function AnalysisPage() {
     updated.sections = [...updated.sections];
     updated.sections[sectionIndex] = section;
 
-    const newJson = JSON.stringify(updated);
+    // Recalculate subtotals and totals based on current line items
+    const recalculated = recalculateTotals(updated, discountToggles);
+
+    const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
 
     saveField(
@@ -150,26 +160,43 @@ export default function AnalysisPage() {
   };
 
   const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
-    const updated = { ...discountToggles };
-    if (!updated[vendorName]) updated[vendorName] = {};
-    updated[vendorName][discountId] = enabled;
-    setDiscountToggles(updated);
+    const updatedToggles = { ...discountToggles };
+    if (!updatedToggles[vendorName]) updatedToggles[vendorName] = {};
+    updatedToggles[vendorName][discountId] = enabled;
+    setDiscountToggles(updatedToggles);
 
-    // Persist to server
-    if (analysis) {
-      const newVal = JSON.stringify(updated);
+    // Recalculate totals with the new discount toggle state
+    if (analysis && comparisonData) {
+      const recalculated = recalculateTotals(comparisonData, updatedToggles);
+      const newComparisonJson = JSON.stringify(recalculated);
+      const newToggleVal = JSON.stringify(updatedToggles);
+
       setSaving(true);
-      fetch(`/api/analysis/${analysis.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'discountToggles',
-          fieldPath: 'discountToggles',
-          oldValue: analysis.discountToggles || '{}',
-          newValue: newVal,
+      // Persist both discount toggles and recalculated comparison data
+      Promise.all([
+        fetch(`/api/analysis/${analysis.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fieldType: 'discountToggles',
+            fieldPath: 'discountToggles',
+            oldValue: analysis.discountToggles || '{}',
+            newValue: newToggleVal,
+          }),
         }),
-      }).finally(() => setSaving(false));
-      setAnalysis({ ...analysis, discountToggles: newVal });
+        fetch(`/api/analysis/${analysis.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fieldType: 'comparisonData',
+            fieldPath: 'discountToggle.recalculation',
+            oldValue: analysis.comparisonData,
+            newValue: newComparisonJson,
+          }),
+        }),
+      ]).finally(() => setSaving(false));
+
+      setAnalysis({ ...analysis, discountToggles: newToggleVal, comparisonData: newComparisonJson });
     }
   };
 

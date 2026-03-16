@@ -15,6 +15,7 @@ interface Document {
   fileType: string;
   uploadedAt: string;
   parsedData: string | null;
+  rawText?: string | null;
   documentType?: string;
   quoteVersion?: number;
   isActive?: boolean;

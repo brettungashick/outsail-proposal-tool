@@ -9,6 +9,7 @@ interface Document {
   fileType: string;
   uploadedAt: string;
   parsedData: string | null;
+  rawText?: string | null;
   documentType?: string;
   quoteVersion?: number;
   isActive?: boolean;
@@ -96,6 +97,11 @@ export default function DocumentList({ documents, onDelete, onToggleActive, read
                         )}
                       </div>
                       <p className="text-xs text-slate-400">{formatDate(doc.uploadedAt)}</p>
+                      {(!doc.rawText || doc.rawText.trim().length < 50 || doc.rawText === 'Error extracting text from file') && (
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          Text extraction failed — AI analysis may be incomplete for this vendor
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
