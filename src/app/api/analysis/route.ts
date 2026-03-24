@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { parseProposal, generateComparison, isApiKeyConfigured } from '@/lib/claude';
+import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -95,8 +95,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Step 2: Generate comparison
-    const analysisResult = await generateComparison(parsedProposals);
+    // Step 2: Generate clarifying questions (two-pass flow)
+    const questions = await generateClarifyingQuestions(parsedProposals);
 
     // Step 3: Determine version number
     const lastAnalysis = await prisma.analysis.findFirst({
@@ -105,24 +105,23 @@ export async function POST(req: NextRequest) {
     });
     const version = (lastAnalysis?.version || 0) + 1;
 
-    // Step 4: Save analysis
+    // Step 4: Save analysis in clarifying state (not complete yet)
     const analysis = await prisma.analysis.create({
       data: {
         projectId,
         version,
-        comparisonData: JSON.stringify(analysisResult.comparisonTable),
-        standardizationNotes: JSON.stringify(analysisResult.standardizationNotes),
-        vendorNotes: JSON.stringify(analysisResult.vendorNotes),
-        nextSteps: JSON.stringify(analysisResult.nextSteps),
-        citations: JSON.stringify(analysisResult.citations),
+        status: 'clarifying',
+        comparisonData: '{}',
+        parsedProposals: JSON.stringify(parsedProposals),
+        clarifyingQuestions: JSON.stringify(questions),
         createdBy: userId,
       },
     });
 
-    // Update project status
+    // Update project status to clarifying
     await prisma.project.update({
       where: { id: projectId },
-      data: { status: 'complete' },
+      data: { status: 'clarifying' },
     });
 
     return NextResponse.json(analysis, { status: 201 });

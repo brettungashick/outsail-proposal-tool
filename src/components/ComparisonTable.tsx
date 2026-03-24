@@ -1,6 +1,7 @@
 'use client';
 
-import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles } from '@/types';
+import { useState, useRef } from 'react';
+import { ComparisonTable as ComparisonTableType, TableSection, DiscountToggles, HiddenRows, CellStatus } from '@/types';
 import EditableCell from './EditableCell';
 
 interface ComparisonTableProps {
@@ -10,11 +11,21 @@ interface ComparisonTableProps {
     sectionIndex: number,
     rowIndex: number,
     vendorIndex: number,
-    newValue: string
+    newDisplay: string,
+    newAmount: number | null
   ) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
+  hiddenRows?: HiddenRows;
+  onToggleHidden?: (rowId: string) => void;
+  onAddRow?: (sectionIndex: number) => void;
+  onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
+  onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
+  onCellStatusChange?: (sectionIndex: number, rowIndex: number, vendorIndex: number, newStatus: CellStatus) => void;
+  onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
 }
+
+const TOTALS_SECTION = 'Totals';
 
 export default function ComparisonTable({
   data,
@@ -22,6 +33,13 @@ export default function ComparisonTable({
   onCellEdit,
   discountToggles,
   onDiscountToggle,
+  hiddenRows,
+  onToggleHidden,
+  onAddRow,
+  onDeleteRow,
+  onRowLabelEdit,
+  onCellStatusChange,
+  onRowReorder,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, string> = {
     'Software Fees (Recurring)': 'bg-blue-600',
@@ -42,13 +60,13 @@ export default function ComparisonTable({
             {data.vendors.map((vendor) => (
               <th
                 key={vendor}
-                className="px-4 py-3 text-left text-sm font-semibold text-slate-700 border border-slate-200 min-w-[180px]"
+                className="px-4 py-3 text-center text-sm font-semibold text-slate-700 border border-slate-200 min-w-[180px]"
               >
                 {vendor}
               </th>
             ))}
           </tr>
-          {data.normalizedHeadcount && (
+          {data.normalizedHeadcount > 0 && (
             <tr className="bg-slate-50">
               <td className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200">
                 Normalized to
@@ -56,7 +74,7 @@ export default function ComparisonTable({
               {data.vendors.map((vendor) => (
                 <td
                   key={vendor}
-                  className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200"
+                  className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200 text-center"
                 >
                   {data.normalizedHeadcount} employees
                 </td>
@@ -76,6 +94,13 @@ export default function ComparisonTable({
               onCellEdit={onCellEdit}
               discountToggles={discountToggles}
               onDiscountToggle={onDiscountToggle}
+              hiddenRows={hiddenRows}
+              onToggleHidden={onToggleHidden}
+              onAddRow={onAddRow}
+              onDeleteRow={onDeleteRow}
+              onRowLabelEdit={onRowLabelEdit}
+              onCellStatusChange={onCellStatusChange}
+              onRowReorder={onRowReorder}
             />
           ))}
         </tbody>
@@ -93,17 +118,34 @@ function SectionBlock({
   onCellEdit,
   discountToggles,
   onDiscountToggle,
+  hiddenRows,
+  onToggleHidden,
+  onAddRow,
+  onDeleteRow,
+  onRowLabelEdit,
+  onCellStatusChange,
+  onRowReorder,
 }: {
   section: TableSection;
   sectionIndex: number;
   vendors: string[];
   headerColor: string;
   isEditable: boolean;
-  onCellEdit: (si: number, ri: number, vi: number, val: string) => void;
+  onCellEdit: (si: number, ri: number, vi: number, display: string, amount: number | null) => void;
   discountToggles?: DiscountToggles;
   onDiscountToggle?: (vendorName: string, discountId: string, enabled: boolean) => void;
+  hiddenRows?: HiddenRows;
+  onToggleHidden?: (rowId: string) => void;
+  onAddRow?: (sectionIndex: number) => void;
+  onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
+  onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
+  onCellStatusChange?: (si: number, ri: number, vi: number, newStatus: CellStatus) => void;
+  onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
+  const isTotalsSection = section.name === TOTALS_SECTION;
+  const dragRowIdx = useRef<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   return (
     <>
@@ -112,26 +154,125 @@ function SectionBlock({
           colSpan={vendors.length + 1}
           className={`px-4 py-2.5 text-sm font-semibold text-white ${headerColor}`}
         >
-          {section.name}
+          <div className="flex items-center justify-between">
+            <span>{section.name}</span>
+            {isEditable && !isTotalsSection && onAddRow && (
+              <button
+                onClick={() => onAddRow(sectionIndex)}
+                className="text-white/70 hover:text-white text-xs font-medium transition"
+                title={`Add row to ${section.name}`}
+              >
+                + Add
+              </button>
+            )}
+          </div>
         </td>
       </tr>
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
+        const isComputed = row.isSubtotal || row.isPepm || isTotalsSection;
+        const canEditCell = isEditable && !isComputed;
+        const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
+        const isRowHidden = hiddenRows?.[row.id] === true;
+        const canDrag = isEditable && !row.isSubtotal && !isTotalsSection && !!onRowReorder;
 
         return (
           <tr
             key={row.id}
-            className={`${
-              row.isSubtotal
-                ? 'bg-slate-50 font-semibold'
-                : isDiscountRow
-                  ? 'bg-amber-50/30'
-                  : 'hover:bg-slate-50/50'
+            draggable={canDrag}
+            onDragStart={(e) => {
+              if (!canDrag) return;
+              dragRowIdx.current = rowIdx;
+              e.dataTransfer.effectAllowed = 'move';
+              (e.currentTarget as HTMLElement).style.opacity = '0.5';
+            }}
+            onDragEnd={(e) => {
+              (e.currentTarget as HTMLElement).style.opacity = '1';
+              dragRowIdx.current = null;
+              setDragOverIdx(null);
+            }}
+            onDragOver={(e) => {
+              if (dragRowIdx.current === null || row.isSubtotal) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dragOverIdx !== rowIdx) setDragOverIdx(rowIdx);
+            }}
+            onDragLeave={() => {
+              if (dragOverIdx === rowIdx) setDragOverIdx(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOverIdx(null);
+              if (dragRowIdx.current !== null && dragRowIdx.current !== rowIdx && !row.isSubtotal) {
+                onRowReorder?.(sectionIndex, dragRowIdx.current, rowIdx);
+              }
+              dragRowIdx.current = null;
+            }}
+            className={`group ${
+              dragOverIdx === rowIdx ? 'border-t-2 border-t-blue-400' : ''
+            } ${
+              isRowHidden
+                ? 'opacity-40 bg-slate-50/50'
+                : row.isSubtotal
+                  ? 'bg-slate-50 font-semibold'
+                  : row.isPepm
+                    ? 'bg-blue-50/50 text-blue-600 text-xs italic'
+                    : isDiscountRow
+                      ? 'bg-amber-50/30'
+                      : 'hover:bg-slate-50/50'
             }`}
           >
             <td className="px-4 py-2 border border-slate-200 text-sm text-slate-700">
               <div className="flex items-center gap-2">
-                {row.label}
+                {canDrag && (
+                  <span className="opacity-0 group-hover:opacity-100 cursor-grab active:cursor-grabbing text-slate-400 flex-shrink-0">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <circle cx="9" cy="5" r="1.5" /><circle cx="15" cy="5" r="1.5" />
+                      <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+                      <circle cx="9" cy="19" r="1.5" /><circle cx="15" cy="19" r="1.5" />
+                    </svg>
+                  </span>
+                )}
+                {canDelete && onDeleteRow && (
+                  <button
+                    onClick={() => onDeleteRow(sectionIndex, rowIdx)}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 flex-shrink-0 transition"
+                    title="Delete row"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+                {isEditable && !row.isSubtotal && !isTotalsSection && onToggleHidden && (
+                  <button
+                    onClick={() => onToggleHidden(row.id)}
+                    className={`opacity-0 group-hover:opacity-100 flex-shrink-0 transition ${
+                      isRowHidden ? 'text-slate-500 !opacity-100' : 'text-slate-400 hover:text-slate-600'
+                    }`}
+                    title={isRowHidden ? 'Show row' : 'Hide row'}
+                  >
+                    {isRowHidden ? (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                      </svg>
+                    ) : (
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    )}
+                  </button>
+                )}
+                {canEditCell && onRowLabelEdit ? (
+                  <EditableRowLabel
+                    label={row.label}
+                    isHidden={isRowHidden}
+                    onSave={(newLabel) => onRowLabelEdit(sectionIndex, rowIdx, newLabel)}
+                  />
+                ) : (
+                  <span className={isRowHidden ? 'line-through' : ''}>{row.label}</span>
+                )}
                 {isDiscountSection && isDiscountRow && onDiscountToggle && (
                   <DiscountToggleButtons
                     rowId={row.id}
@@ -143,7 +284,6 @@ function SectionBlock({
               </div>
             </td>
             {row.values.map((val, vendorIdx) => {
-              // Check if this discount is toggled off
               let isToggledOff = false;
               if (isDiscountSection && isDiscountRow && discountToggles) {
                 const vendorName = vendors[vendorIdx];
@@ -160,10 +300,18 @@ function SectionBlock({
                 >
                   <EditableCell
                     value={val.display}
-                    isEditable={isEditable && !row.isSubtotal}
+                    isEditable={canEditCell}
                     isConfirmed={val.isConfirmed}
+                    isComputed={isComputed}
                     note={val.note}
-                    onSave={(newVal) => onCellEdit(sectionIndex, rowIdx, vendorIdx, newVal)}
+                    status={val.status}
+                    onSave={(newDisplay, newAmount) =>
+                      onCellEdit(sectionIndex, rowIdx, vendorIdx, newDisplay, newAmount)
+                    }
+                    onStatusChange={onCellStatusChange
+                      ? (newStatus) => onCellStatusChange(sectionIndex, rowIdx, vendorIdx, newStatus)
+                      : undefined
+                    }
                   />
                 </td>
               );
@@ -172,6 +320,61 @@ function SectionBlock({
         );
       })}
     </>
+  );
+}
+
+function EditableRowLabel({
+  label,
+  isHidden,
+  onSave,
+}: {
+  label: string;
+  isHidden: boolean;
+  onSave: (newLabel: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label);
+
+  const handleSave = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== label) {
+      onSave(trimmed);
+    } else {
+      setDraft(label);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        className="px-1.5 py-0.5 text-sm border border-blue-400 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400 min-w-[120px]"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={handleSave}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSave();
+          if (e.key === 'Escape') {
+            setDraft(label);
+            setEditing(false);
+          }
+        }}
+        autoFocus
+      />
+    );
+  }
+
+  return (
+    <span
+      className={`cursor-pointer hover:underline hover:text-blue-600 ${isHidden ? 'line-through' : ''}`}
+      onClick={() => {
+        setDraft(label);
+        setEditing(true);
+      }}
+      title="Click to rename"
+    >
+      {label}
+    </span>
   );
 }
 
@@ -186,7 +389,6 @@ function DiscountToggleButtons({
   discountToggles?: DiscountToggles;
   onToggle: (vendorName: string, discountId: string, enabled: boolean) => void;
 }) {
-  // Show a small toggle for each vendor
   return (
     <div className="flex gap-1 ml-2">
       {vendors.map((vendor) => {

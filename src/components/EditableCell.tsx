@@ -1,25 +1,46 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { CellStatus } from '@/types';
+
+const STATUS_OPTIONS: { value: CellStatus; label: string }[] = [
+  { value: 'tbc', label: 'To be confirmed' },
+  { value: 'included', label: 'Included' },
+  { value: 'included_in_bundle', label: 'Included in bundle' },
+  { value: 'not_included', label: 'Not included' },
+  { value: 'na', label: 'N/A' },
+  { value: 'hidden', label: 'Hidden' },
+];
 
 interface EditableCellProps {
   value: string;
   isEditable: boolean;
   isConfirmed: boolean;
+  isComputed?: boolean;
   note: string | null;
-  onSave: (newValue: string) => void;
+  status?: CellStatus;
+  onSave: (newDisplay: string, newAmount: number | null) => void;
+  onStatusChange?: (status: CellStatus) => void;
 }
 
 export default function EditableCell({
   value,
   isEditable,
   isConfirmed,
+  isComputed,
   note,
+  status,
   onSave,
+  onStatusChange,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -31,8 +52,21 @@ export default function EditableCell({
   const handleSave = () => {
     setEditing(false);
     if (editValue !== value) {
-      onSave(editValue);
+      const cleaned = editValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim();
+      const parsed = parseFloat(cleaned);
+      if (!isNaN(parsed)) {
+        onSave(editValue, parsed);
+      } else {
+        onSave(editValue, null);
+      }
     }
+  };
+
+  const handleBlur = (e: React.FocusEvent) => {
+    // If focus is moving to another element within the editing container (e.g. the select),
+    // don't exit editing mode yet.
+    if (containerRef.current?.contains(e.relatedTarget as Node)) return;
+    handleSave();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -43,46 +77,126 @@ export default function EditableCell({
     }
   };
 
-  const bgColor = !isConfirmed
-    ? 'bg-yellow-50'
-    : value === 'Not included'
-      ? 'bg-slate-50'
-      : value === 'Included in bundle'
-        ? 'bg-blue-50'
-        : '';
+  const handleStatusSelect = (newStatus: CellStatus) => {
+    setEditing(false);
+    if (onStatusChange) {
+      onStatusChange(newStatus);
+    } else {
+      const displayMap: Record<CellStatus, string> = {
+        currency: value,
+        tbc: 'To be confirmed',
+        included: 'Included',
+        included_in_bundle: 'Included in bundle',
+        not_included: 'Not included',
+        na: 'N/A',
+        hidden: 'Hidden',
+      };
+      onSave(displayMap[newStatus], null);
+    }
+  };
 
-  if (editing && isEditable) {
+  // Determine visual state from status (with display-string fallback for old data)
+  const lowerValue = value.toLowerCase().trim();
+  const isIncluded = status
+    ? status === 'included' || status === 'included_in_bundle'
+    : lowerValue === 'included' || lowerValue === 'included in bundle';
+  const isNotIncluded = status
+    ? status === 'not_included' || status === 'na'
+    : lowerValue === 'not included' || lowerValue === 'n/a';
+  const isHidden = status ? status === 'hidden' : lowerValue === 'hidden';
+  const isUnconfirmed = !isConfirmed && !isHidden;
+  const isCurrency = /^-?\$[\d,]+/.test(value);
+
+  let cellBg = '';
+  let textClass = 'text-slate-900';
+
+  if (isHidden) {
+    cellBg = 'bg-slate-50';
+    textClass = 'text-slate-400 italic';
+  } else if (isIncluded) {
+    cellBg = '';
+    textClass = 'text-green-600';
+  } else if (isNotIncluded) {
+    cellBg = '';
+    textClass = 'text-red-500';
+  } else if (isUnconfirmed) {
+    cellBg = 'bg-yellow-50';
+    textClass = 'text-amber-700';
+  }
+
+  const canEdit = isEditable && !isComputed;
+
+  if (editing && canEdit) {
     return (
-      <td className="px-3 py-2 border border-slate-200">
+      <div ref={containerRef} className="px-2 py-1.5" onBlur={handleBlur}>
         <input
           ref={inputRef}
           type="text"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
           onKeyDown={handleKeyDown}
-          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          placeholder="$0"
+          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-1"
         />
-      </td>
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) {
+              handleStatusSelect(e.target.value as CellStatus);
+            }
+          }}
+          className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-500 bg-white cursor-pointer"
+        >
+          <option value="" disabled>Or set status...</option>
+          {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
     );
   }
 
   return (
-    <td
-      className={`px-3 py-2 border border-slate-200 text-sm ${bgColor} ${
-        isEditable ? 'cursor-pointer hover:bg-blue-50/50' : ''
-      }`}
-      onClick={() => isEditable && setEditing(true)}
+    <div
+      className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
+        canEdit ? 'cursor-pointer hover:bg-blue-50/50' : ''
+      } ${isComputed ? 'bg-slate-50/50' : ''}`}
+      onClick={() => canEdit && setEditing(true)}
       title={note || undefined}
     >
-      <div className="flex items-center gap-1">
-        <span className={!isConfirmed ? 'text-amber-700' : 'text-slate-900'}>{value}</span>
-        {note && (
-          <span className="text-xs text-amber-500 ml-1" title={note}>
-            *
-          </span>
+      <div className="flex items-center justify-center gap-1.5">
+        {isIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : isNotIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : (
+          <>
+            <span className={`${textClass} ${isCurrency ? 'font-medium' : ''}`}>{value}</span>
+            {isComputed && (
+              <span title="Auto-calculated">
+                <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm2.25-4.5h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm2.25-6.75h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm2.25-4.5h.008v.008H15v-.008zm0 2.25h.008v.008H15v-.008zm3.75-12v16.5a2.25 2.25 0 01-2.25 2.25H5.25a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0020.25 4.5H3.75A2.25 2.25 0 001.5 6.75m19.5 0v1.5" />
+                </svg>
+              </span>
+            )}
+            {note && !isComputed && (
+              <span className="text-xs text-amber-500" title={note}>
+                *
+              </span>
+            )}
+          </>
         )}
       </div>
-    </td>
+    </div>
   );
 }

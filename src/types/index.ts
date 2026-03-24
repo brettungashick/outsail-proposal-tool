@@ -1,9 +1,13 @@
+export type CellStatus = 'currency' | 'included' | 'included_in_bundle' | 'not_included' | 'tbc' | 'na' | 'hidden';
+
 export interface VendorValue {
   amount: number | null;
   display: string;
   note: string | null;
   citation: Citation | null;
   isConfirmed: boolean;
+  status?: CellStatus;
+  isManualOverride?: boolean;
 }
 
 export interface TableRow {
@@ -12,6 +16,7 @@ export interface TableRow {
   values: VendorValue[];
   isSubtotal?: boolean;
   isDiscount?: boolean;
+  isPepm?: boolean;
 }
 
 export interface TableSection {
@@ -23,6 +28,8 @@ export interface ComparisonTable {
   vendors: string[];
   normalizedHeadcount: number;
   sections: TableSection[];
+  headcountGrowthY2?: number; // percentage, e.g. 5 for 5%
+  headcountGrowthY3?: number;
 }
 
 export interface Citation {
@@ -47,7 +54,7 @@ export interface ParsedDiscount {
   type: 'percentage' | 'flat' | 'unknown';
   percentageValue: number | null;
   rawText: string;
-  appliesToYear?: number | null; // null = all years, 1 = first year only, etc.
+  appliesToYear?: number | null;
 }
 
 export interface ParsedProposal {
@@ -89,3 +96,15 @@ export interface ParsedLineItem {
 
 // Discount toggle state: { "VendorName": { "discountId": true/false } }
 export type DiscountToggles = Record<string, Record<string, boolean>>;
+
+// Hidden row toggle state: { "rowId": true } — rows hidden for standardization
+export type HiddenRows = Record<string, boolean>;
+
+export interface ClarifyingQuestion {
+  id: string;
+  category: 'missing_data' | 'ambiguity' | 'discrepancy' | 'assumption' | 'general';
+  vendorName: string | null;
+  question: string;
+  context: string;
+  suggestedDefault: string | null;
+}

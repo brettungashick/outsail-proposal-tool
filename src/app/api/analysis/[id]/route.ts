@@ -67,6 +67,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     updateData.nextSteps = newValue;
   } else if (fieldType === 'discountToggles') {
     updateData.discountToggles = newValue;
+  } else if (fieldType === 'hiddenRows') {
+    updateData.hiddenRows = newValue;
   }
 
   if (Object.keys(updateData).length > 0) {

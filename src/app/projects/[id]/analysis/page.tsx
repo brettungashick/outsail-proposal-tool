@@ -2,24 +2,28 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Navbar from '@/components/Navbar';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
-import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus } from '@/types';
+import { recalculateTable } from '@/lib/recalculate';
+import { generateId } from '@/lib/utils';
 
 interface AnalysisData {
   id: string;
   version: number;
+  status?: string;
   comparisonData: string;
   standardizationNotes: string;
   vendorNotes: string;
   nextSteps: string;
   citations: string;
   discountToggles: string | null;
+  hiddenRows: string | null;
   createdAt: string;
   project: { name: string; clientName: string; isOwner?: boolean; isAdmin?: boolean };
 }
@@ -40,7 +44,9 @@ export default function AnalysisPage() {
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
+  const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -55,7 +61,15 @@ export default function AnalysisPage() {
     const proj = await projRes.json();
     setIsOwner(proj.isOwner);
     setIsAdmin(proj.isAdmin);
-    const targetId = analysisId || proj.analyses?.[0]?.id;
+
+    // If latest analysis is in clarifying state, redirect to project page
+    const latestAnalysis = proj.analyses?.[0];
+    if (latestAnalysis?.status === 'clarifying') {
+      router.push(`/projects/${projectId}`);
+      return;
+    }
+
+    const targetId = analysisId || latestAnalysis?.id;
 
     if (!targetId) {
       setLoading(false);
@@ -66,24 +80,22 @@ export default function AnalysisPage() {
     if (res.ok) {
       const data = await res.json();
       setAnalysis(data);
-      // Load discount toggles
       if (data.discountToggles) {
-        try {
-          setDiscountToggles(JSON.parse(data.discountToggles));
-        } catch {
-          setDiscountToggles({});
-        }
+        try { setDiscountToggles(JSON.parse(data.discountToggles)); } catch { setDiscountToggles({}); }
+      }
+      if (data.hiddenRows) {
+        try { setHiddenRows(JSON.parse(data.hiddenRows)); } catch { setHiddenRows({}); }
       }
     }
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, router]);
 
   useEffect(() => {
     if (authStatus === 'authenticated') fetchAnalysis();
   }, [authStatus, fetchAnalysis]);
 
   const comparisonData: ComparisonTableType | null = analysis
-    ? JSON.parse(analysis.comparisonData)
+    ? (() => { try { return JSON.parse(analysis.comparisonData); } catch { return null; } })()
     : null;
   const standardizationNotes: string[] = analysis?.standardizationNotes
     ? JSON.parse(analysis.standardizationNotes)
@@ -95,6 +107,25 @@ export default function AnalysisPage() {
   const citations: Citation[] = analysis?.citations ? JSON.parse(analysis.citations) : [];
 
   const canEdit = isOwner || isAdmin;
+
+  // Debounced save for comparison data
+  const debouncedSaveComparison = useCallback((newJson: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      if (!analysis) return;
+      setSaving(true);
+      fetch(`/api/analysis/${analysis.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fieldType: 'comparisonData',
+          fieldPath: 'comparisonData',
+          oldValue: analysis.comparisonData,
+          newValue: newJson,
+        }),
+      }).finally(() => setSaving(false));
+    }, 500);
+  }, [analysis]);
 
   const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
     if (!analysis) return;
@@ -114,39 +145,64 @@ export default function AnalysisPage() {
     sectionIndex: number,
     rowIndex: number,
     vendorIndex: number,
-    newDisplayValue: string
+    newDisplayValue: string,
+    newAmount: number | null
   ) => {
     if (!comparisonData || !analysis) return;
 
-    const updated = { ...comparisonData };
-    const section = { ...updated.sections[sectionIndex] };
-    const row = { ...section.rows[rowIndex] };
-    const val = { ...row.values[vendorIndex] };
+    const updated = structuredClone(comparisonData);
+    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
 
-    const oldDisplay = val.display;
     val.display = newDisplayValue;
-
-    const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
-    if (!isNaN(numVal)) {
-      val.amount = numVal;
+    if (newAmount !== null) {
+      val.amount = newAmount;
+    } else {
+      // Try to parse from display
+      const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
+      if (!isNaN(numVal)) {
+        val.amount = numVal;
+      }
     }
 
-    row.values = [...row.values];
-    row.values[vendorIndex] = val;
-    section.rows = [...section.rows];
-    section.rows[rowIndex] = row;
-    updated.sections = [...updated.sections];
-    updated.sections[sectionIndex] = section;
-
-    const newJson = JSON.stringify(updated);
+    // Recalculate subtotals and totals
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
 
-    saveField(
-      'comparisonData',
-      `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}].display`,
-      oldDisplay,
-      newJson
-    );
+  const handleCellStatusChange = (
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number,
+    newStatus: CellStatus
+  ) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+
+    const displayMap: Record<CellStatus, string> = {
+      currency: val.display,
+      tbc: 'To be confirmed',
+      included: 'Included',
+      included_in_bundle: 'Included in bundle',
+      not_included: 'Not included',
+      na: 'N/A',
+      hidden: 'Hidden',
+    };
+
+    val.display = displayMap[newStatus];
+    val.status = newStatus;
+    val.isConfirmed = newStatus !== 'tbc';
+    if (newStatus !== 'currency') {
+      val.amount = null;
+    }
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
   };
 
   const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
@@ -155,9 +211,14 @@ export default function AnalysisPage() {
     updated[vendorName][discountId] = enabled;
     setDiscountToggles(updated);
 
-    // Persist to server
-    if (analysis) {
-      const newVal = JSON.stringify(updated);
+    // Recalculate with new toggles
+    if (comparisonData && analysis) {
+      const recalculated = recalculateTable(comparisonData, updated, hiddenRows);
+      const newJson = JSON.stringify(recalculated);
+      setAnalysis({ ...analysis, comparisonData: newJson, discountToggles: JSON.stringify(updated) });
+      debouncedSaveComparison(newJson);
+
+      // Also save discount toggles
       setSaving(true);
       fetch(`/api/analysis/${analysis.id}`, {
         method: 'PUT',
@@ -166,11 +227,110 @@ export default function AnalysisPage() {
           fieldType: 'discountToggles',
           fieldPath: 'discountToggles',
           oldValue: analysis.discountToggles || '{}',
-          newValue: newVal,
+          newValue: JSON.stringify(updated),
         }),
       }).finally(() => setSaving(false));
-      setAnalysis({ ...analysis, discountToggles: newVal });
     }
+  };
+
+  const handleToggleHidden = (rowId: string) => {
+    const updated = { ...hiddenRows };
+    if (updated[rowId]) {
+      delete updated[rowId];
+    } else {
+      updated[rowId] = true;
+    }
+    setHiddenRows(updated);
+
+    if (comparisonData && analysis) {
+      const recalculated = recalculateTable(comparisonData, discountToggles, updated);
+      const newJson = JSON.stringify(recalculated);
+      setAnalysis({ ...analysis, comparisonData: newJson, hiddenRows: JSON.stringify(updated) });
+      debouncedSaveComparison(newJson);
+
+      // Save hidden rows
+      fetch(`/api/analysis/${analysis.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fieldType: 'hiddenRows',
+          fieldPath: 'hiddenRows',
+          oldValue: analysis.hiddenRows || '{}',
+          newValue: JSON.stringify(updated),
+        }),
+      });
+    }
+  };
+
+  const handleAddRow = (sectionIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const section = updated.sections[sectionIndex];
+    const isDiscountSection = section.name === 'Discounts';
+
+    const newRow = {
+      id: generateId(),
+      label: 'New Item',
+      values: updated.vendors.map(() => ({
+        amount: null,
+        display: 'To be confirmed',
+        note: null,
+        citation: null,
+        isConfirmed: false,
+      })),
+      isDiscount: isDiscountSection,
+      isSubtotal: false,
+    };
+
+    // Insert before subtotal row if one exists
+    const subtotalIdx = section.rows.findIndex(r => r.isSubtotal);
+    if (subtotalIdx >= 0) {
+      section.rows.splice(subtotalIdx, 0, newRow);
+    } else {
+      section.rows.push(newRow);
+    }
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleDeleteRow = (sectionIndex: number, rowIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    updated.sections[sectionIndex].rows.splice(rowIndex, 1);
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleRowLabelEdit = (sectionIndex: number, rowIndex: number, newLabel: string) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    updated.sections[sectionIndex].rows[rowIndex].label = newLabel;
+
+    const newJson = JSON.stringify(updated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleRowReorder = (sectionIndex: number, fromIndex: number, toIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const rows = updated.sections[sectionIndex].rows;
+    const [moved] = rows.splice(fromIndex, 1);
+    rows.splice(toIndex, 0, moved);
+
+    const newJson = JSON.stringify(updated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
   };
 
   const handleUpdateStandardization = (notes: string[]) => {
@@ -331,6 +491,13 @@ export default function AnalysisPage() {
                 onCellEdit={handleCellEdit}
                 discountToggles={discountToggles}
                 onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
+                hiddenRows={hiddenRows}
+                onToggleHidden={canEdit ? handleToggleHidden : undefined}
+                onAddRow={canEdit ? handleAddRow : undefined}
+                onDeleteRow={canEdit ? handleDeleteRow : undefined}
+                onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
+                onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
+                onRowReorder={canEdit ? handleRowReorder : undefined}
               />
             </div>
 

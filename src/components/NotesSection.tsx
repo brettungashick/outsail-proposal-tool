@@ -151,7 +151,7 @@ function NotesBlock({
               {isEditable && editIndex !== idx && (
                 <button
                   onClick={() => removeNote(idx)}
-                  className="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 transition"
+                  className="opacity-40 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 transition"
                 >
                   ×
                 </button>
@@ -239,7 +239,7 @@ function VendorNotesBlock({
             {isEditable && editIndex !== idx && (
               <button
                 onClick={() => removeNote(idx)}
-                className="opacity-0 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 transition"
+                className="opacity-40 group-hover:opacity-100 text-xs text-red-400 hover:text-red-600 transition"
               >
                 ×
               </button>

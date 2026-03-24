@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ParsedProposal, AnalysisResult } from '@/types';
+import { ParsedProposal, AnalysisResult, ClarifyingQuestion } from '@/types';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -114,7 +114,8 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
 }
 
 export async function generateComparison(
-  parsedProposals: ParsedProposal[]
+  parsedProposals: ParsedProposal[],
+  advisorContext?: string
 ): Promise<AnalysisResult> {
   const vendorNames = parsedProposals.map((p) => p.vendorName);
   const headcounts = parsedProposals
@@ -131,12 +132,13 @@ CRITICAL RULES:
 - NEVER hallucinate or fill in gaps that are not found in the parsed data below. If something is missing, set amount to null, display to "To be confirmed", and isConfirmed to false.
 - When a price range was given (isRange: true), use the MIDPOINT of rangeMin and rangeMax. Note this in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
+- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. Implementation fees are one-time and should NOT be annualized. Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes.
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
 - Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
 
 PARSED PROPOSALS:
 ${JSON.stringify(parsedProposals, null, 2)}
-
+${advisorContext ? `\n${advisorContext}\n\nIMPORTANT: Use the advisor's clarifications above to resolve ambiguities, fill in missing data, and adjust your analysis accordingly. The advisor has domain expertise — prioritize their input over assumptions.\n` : ''}
 BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no markdown, no explanation):
 
 {
@@ -153,7 +155,7 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
             "values": [
               {
                 "amount": <number or null>,
-                "display": "<formatted $ amount or 'To be confirmed' or 'Not included' or 'Included in bundle'>",
+                "display": "<MUST be one of exactly 5 states: '$X,XXX' (dollar amount only, NO /yr suffix), 'Included in bundle' (module included but priced elsewhere), 'Not included' (definitely not in this vendor's offering), 'To be confirmed' (unclear if included), or 'Hidden' (included in bundle or removed for standardization)>",
                 "note": "<any note about this value, e.g. 'Midpoint of $5-$8 PEPM' or 'Scaled from 100 to ${targetHeadcount} employees' or null>",
                 "citation": {
                   "documentId": "<doc id>",
@@ -185,7 +187,7 @@ BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no mark
             "values": [
               {
                 "amount": <negative number representing the discount, or null if vendor has no such discount>,
-                "display": "<formatted negative $ amount like '-$1,200/yr' or 'N/A'>",
+                "display": "<formatted negative $ amount like '-$1,200' or 'N/A'>",
                 "note": "<e.g. '10% first-year discount' or null>",
                 "citation": <citation object or null>,
                 "isConfirmed": <boolean>
@@ -238,9 +240,29 @@ CONSENSUS MODULE CATEGORIES (map vendor modules to these):
 - Performance Management (include only if at least one vendor has it)
 - Compensation Management (include only if at least one vendor has it)
 
-For Software Fees, add a "Software Subtotal" row at the end.
-For Implementation Fees rows, consider: Total Implementation, GL Integration, Carrier Feeds, 401k Integration, Historical Data Conversion, Project Manager, Training.
-For Service Fees rows, consider: Tax Filing, COBRA Admin, HSA/FSA Admin, Integration Maintenance.
+For Software Fees, add a "Software Subtotal" row at the end (isSubtotal: true).
+
+For Implementation Fees, break out into as much detail as possible. Common implementation line items include:
+- Total Implementation / Base Implementation Fee
+- General Ledger (GL) Integration
+- Carrier Feeds / Benefits Carrier Connections
+- 401(k) Integration
+- Additional Integrations (specify which if known)
+- Historical Data Conversion / Data Migration
+- Project Management
+- Training / Administrator Training
+- Open Enrollment Support
+Do NOT lump everything into a single "Total Implementation" row if the vendor provides line-item detail. Use "Not included" for items a vendor doesn't offer, "To be confirmed" for unclear items.
+
+For Service Fees, break out into detail. Common recurring service fees include:
+- End-of-Year Tax Filing / W-2 Processing
+- COBRA Administration
+- HSA/FSA Administration
+- Managed Services / HR Outsourcing (if applicable)
+- Integration Maintenance / Ongoing Support Fees
+- ACA Compliance / Reporting
+These vary widely — some vendors bundle tax filing into payroll, others charge separately. Use "Included in bundle" when it's part of another fee. Only include rows where at least one vendor has data.
+
 Only include rows where at least one vendor has data.
 
 For Discounts section:
@@ -260,7 +282,7 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 8192,
+    max_tokens: 16384,
     messages: [{ role: 'user', content: prompt }],
   });
 
@@ -271,6 +293,80 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
     cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
 
-  const result: AnalysisResult = JSON.parse(cleanText);
-  return result;
+  // Extract valid JSON if there's leading/trailing text
+  const firstBrace = cleanText.indexOf('{');
+  if (firstBrace > 0) {
+    cleanText = cleanText.slice(firstBrace);
+  }
+  const lastBrace = cleanText.lastIndexOf('}');
+  if (lastBrace > 0 && lastBrace < cleanText.length - 1) {
+    cleanText = cleanText.slice(0, lastBrace + 1);
+  }
+
+  try {
+    const result: AnalysisResult = JSON.parse(cleanText);
+    return result;
+  } catch (parseError) {
+    console.error('Failed to parse Claude comparison response. Response length:', responseText.length, 'Stop reason:', message.stop_reason);
+    if (message.stop_reason === 'max_tokens') {
+      throw new Error('The AI response was too long and got cut off. Please try again — the analysis will regenerate.');
+    }
+    throw parseError;
+  }
+}
+
+export async function generateClarifyingQuestions(
+  parsedProposals: ParsedProposal[]
+): Promise<ClarifyingQuestion[]> {
+  const vendorNames = parsedProposals.map((p) => p.vendorName);
+
+  const prompt = `You are an expert HRIS/HR Tech proposal analyst reviewing ${parsedProposals.length} parsed vendor proposals from: ${vendorNames.join(', ')}.
+
+Before generating a final comparison, you need to identify any areas of uncertainty, missing data, ambiguities, or assumptions that an experienced advisor should review.
+
+PARSED PROPOSALS:
+${JSON.stringify(parsedProposals, null, 2)}
+
+Analyze the proposals and generate clarifying questions. Focus on:
+
+1. **Missing Data**: Key pricing fields that are null or "To be confirmed" — ask if the advisor has this info from emails, calls, or other docs.
+2. **Ambiguities**: Pricing that could be interpreted multiple ways (e.g., unclear if a fee is monthly vs annual, per-employee vs flat).
+3. **Discrepancies**: Differences between vendors that seem unusual (e.g., one vendor includes a module free that others charge for — is it truly included or missing from their quote?).
+4. **Assumptions**: Things the AI would need to assume for the comparison (e.g., headcount normalization, contract term alignment, how to handle price ranges).
+5. **General**: Any other observations the advisor should verify before the comparison is finalized.
+
+RULES:
+- Generate between 3-8 questions. Focus on the most impactful items.
+- Be specific — reference exact vendor names, module names, and dollar amounts.
+- Each question should be actionable — the advisor can either provide a concrete answer or confirm the AI's suggested default.
+- Do NOT ask generic questions. Every question should be grounded in something specific from the parsed data.
+- Sort by importance: missing data and discrepancies first, assumptions last.
+
+Return ONLY valid JSON (no markdown, no explanation) as an array:
+[
+  {
+    "id": "q1",
+    "category": "missing_data|ambiguity|discrepancy|assumption|general",
+    "vendorName": "<specific vendor name or null if applies to all>",
+    "question": "<the question for the advisor>",
+    "context": "<brief explanation of why this matters for the comparison>",
+    "suggestedDefault": "<what the AI would assume if the advisor skips this, or null>"
+  }
+]`;
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 4096,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
+
+  let cleanText = responseText.trim();
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+
+  const questions: ClarifyingQuestion[] = JSON.parse(cleanText);
+  return questions;
 }
