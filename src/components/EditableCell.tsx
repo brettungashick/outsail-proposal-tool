@@ -17,10 +17,12 @@ interface EditableCellProps {
   isEditable: boolean;
   isConfirmed: boolean;
   isComputed?: boolean;
+  isManualOverride?: boolean;
   note: string | null;
   status?: CellStatus;
   onSave: (newDisplay: string, newAmount: number | null) => void;
   onStatusChange?: (status: CellStatus) => void;
+  onClearOverride?: () => void;
 }
 
 export default function EditableCell({
@@ -28,10 +30,12 @@ export default function EditableCell({
   isEditable,
   isConfirmed,
   isComputed,
+  isManualOverride,
   note,
   status,
   onSave,
   onStatusChange,
+  onClearOverride,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
@@ -124,7 +128,7 @@ export default function EditableCell({
     textClass = 'text-amber-700';
   }
 
-  const canEdit = isEditable && !isComputed;
+  const canEdit = isEditable;
 
   if (editing && canEdit) {
     return (
@@ -160,7 +164,7 @@ export default function EditableCell({
     <div
       className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
         canEdit ? 'cursor-pointer hover:bg-blue-50/50' : ''
-      } ${isComputed ? 'bg-slate-50/50' : ''}`}
+      } ${isComputed && !isManualOverride ? 'bg-slate-50/50' : ''} ${isManualOverride ? 'bg-amber-50/30' : ''}`}
       onClick={() => canEdit && setEditing(true)}
       title={note || undefined}
     >
@@ -182,7 +186,27 @@ export default function EditableCell({
         ) : (
           <>
             <span className={`${textClass} ${isCurrency ? 'font-medium' : ''}`}>{value}</span>
-            {isComputed && (
+            {isComputed && isManualOverride && (
+              <span className="inline-flex items-center gap-0.5">
+                <span title="Manually overridden">
+                  <svg className="w-3 h-3 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                  </svg>
+                </span>
+                {onClearOverride && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onClearOverride(); }}
+                    className="text-amber-400 hover:text-amber-600 transition"
+                    title="Reset to auto-calculated value"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                    </svg>
+                  </button>
+                )}
+              </span>
+            )}
+            {isComputed && !isManualOverride && (
               <span title="Auto-calculated">
                 <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm2.25-4.5h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm2.25-6.75h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm2.25-4.5h.008v.008H15v-.008zm0 2.25h.008v.008H15v-.008zm3.75-12v16.5a2.25 2.25 0 01-2.25 2.25H5.25a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0020.25 4.5H3.75A2.25 2.25 0 001.5 6.75m19.5 0v1.5" />

@@ -23,6 +23,7 @@ interface ComparisonTableProps {
   onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
   onCellStatusChange?: (sectionIndex: number, rowIndex: number, vendorIndex: number, newStatus: CellStatus) => void;
   onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
+  onClearOverride?: (sectionIndex: number, rowIndex: number, vendorIndex: number) => void;
 }
 
 const TOTALS_SECTION = 'Totals';
@@ -40,6 +41,7 @@ export default function ComparisonTable({
   onRowLabelEdit,
   onCellStatusChange,
   onRowReorder,
+  onClearOverride,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, string> = {
     'Software Fees (Recurring)': 'bg-blue-600',
@@ -101,6 +103,7 @@ export default function ComparisonTable({
               onRowLabelEdit={onRowLabelEdit}
               onCellStatusChange={onCellStatusChange}
               onRowReorder={onRowReorder}
+              onClearOverride={onClearOverride}
             />
           ))}
         </tbody>
@@ -125,6 +128,7 @@ function SectionBlock({
   onRowLabelEdit,
   onCellStatusChange,
   onRowReorder,
+  onClearOverride,
 }: {
   section: TableSection;
   sectionIndex: number;
@@ -141,6 +145,7 @@ function SectionBlock({
   onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
   onCellStatusChange?: (si: number, ri: number, vi: number, newStatus: CellStatus) => void;
   onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
+  onClearOverride?: (si: number, ri: number, vi: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
   const isTotalsSection = section.name === TOTALS_SECTION;
@@ -171,7 +176,7 @@ function SectionBlock({
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
         const isComputed = row.isSubtotal || row.isPepm || isTotalsSection;
-        const canEditCell = isEditable && !isComputed;
+        const canEditCell = isEditable;
         const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
         const isRowHidden = hiddenRows?.[row.id] === true;
         const canDrag = isEditable && !row.isSubtotal && !isTotalsSection && !!onRowReorder;
@@ -303,6 +308,7 @@ function SectionBlock({
                     isEditable={canEditCell}
                     isConfirmed={val.isConfirmed}
                     isComputed={isComputed}
+                    isManualOverride={val.isManualOverride === true}
                     note={val.note}
                     status={val.status}
                     onSave={(newDisplay, newAmount) =>
@@ -310,6 +316,10 @@ function SectionBlock({
                     }
                     onStatusChange={onCellStatusChange
                       ? (newStatus) => onCellStatusChange(sectionIndex, rowIdx, vendorIdx, newStatus)
+                      : undefined
+                    }
+                    onClearOverride={onClearOverride
+                      ? () => onClearOverride(sectionIndex, rowIdx, vendorIdx)
                       : undefined
                     }
                   />

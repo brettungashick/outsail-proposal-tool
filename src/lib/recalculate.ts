@@ -90,9 +90,16 @@ function sumDiscountsByYear(
       label.includes('first year') ||
       label.includes('year 1') ||
       label.includes('first-year') ||
+      label.includes('one-time') ||
+      label.includes('one time') ||
+      label.includes('signing') ||
+      label.includes('implementation discount') ||
       note.includes('first year') ||
       note.includes('year 1') ||
-      note.includes('first-year');
+      note.includes('first-year') ||
+      note.includes('one-time') ||
+      note.includes('one time') ||
+      note.includes('year 1 only');
 
     if (yearFilter === 'year1_only' && !isYear1Only) continue;
     if (yearFilter === 'recurring' && isYear1Only) continue;
@@ -149,7 +156,6 @@ export function recalculateTable(
 
     for (const row of section.rows) {
       if (!row.isSubtotal) continue;
-      if (row.values.some(v => v.isManualOverride)) continue;
       for (let vi = 0; vi < vendorCount; vi++) {
         if (row.values[vi]?.isManualOverride) continue;
         const r = sumDataRows(section, vi, hiddenRows);

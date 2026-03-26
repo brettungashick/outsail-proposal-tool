@@ -269,13 +269,14 @@ For Discounts section:
 - Include each unique discount found across all vendors.
 - Use negative amounts for discounts.
 - If a vendor does not have a particular discount, set amount to null and display to "N/A".
+- CRITICAL: Classify each discount by timeframe. If the parsed proposal's appliesToYear === 1, or the discount mentions "first year", "one-time", "signing bonus", or "implementation discount", include "Year 1" or "First Year" in the discount row LABEL (e.g., "First Year Discount - 10%") AND in the note field. If the discount is recurring/ongoing, do NOT use year-specific language. This is critical because the system uses keyword detection on labels and notes to filter which discounts apply to Year 2 and Year 3.
 
 For Totals:
 - Year 1 (Before Discounts) = Annual Software Subtotal + Annual Service Fees + Implementation Fees
 - Year 1 Discounts = Sum of all applicable Year 1 discounts (as negative number)
 - Year 1 Total = Year 1 (Before Discounts) + Year 1 Discounts
-- Year 2 = Annual Software Subtotal + Annual Service Fees + applicable recurring discounts
-- Year 3 = Same as Year 2
+- Year 2 = Annual Software Subtotal + Annual Service Fees + RECURRING discounts only (exclude first-year-only discounts, no implementation fees)
+- Year 3 = Same as Year 2 (recurring costs only, no first-year discounts, no implementation fees)
 - 3-Year Total = Year 1 + Year 2 + Year 3
 
 If any component of a total is "To be confirmed", mark the total as "To be confirmed" too and note which components are missing.`;

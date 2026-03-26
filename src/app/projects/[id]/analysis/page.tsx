@@ -151,7 +151,8 @@ export default function AnalysisPage() {
     if (!comparisonData || !analysis) return;
 
     const updated = structuredClone(comparisonData);
-    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
 
     val.display = newDisplayValue;
     if (newAmount !== null) {
@@ -164,7 +165,30 @@ export default function AnalysisPage() {
       }
     }
 
+    // Mark computed cells as manually overridden so recalculate skips them
+    const isComputedRow = row.isSubtotal || row.isPepm || updated.sections[sectionIndex].name === 'Totals';
+    if (isComputedRow) {
+      val.isManualOverride = true;
+    }
+
     // Recalculate subtotals and totals
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleClearOverride = (
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number
+  ) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    delete updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex].isManualOverride;
+
+    // Recalculate will now recompute this cell
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
@@ -180,7 +204,8 @@ export default function AnalysisPage() {
     if (!comparisonData || !analysis) return;
 
     const updated = structuredClone(comparisonData);
-    const val = updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
 
     const displayMap: Record<CellStatus, string> = {
       currency: val.display,
@@ -197,6 +222,12 @@ export default function AnalysisPage() {
     val.isConfirmed = newStatus !== 'tbc';
     if (newStatus !== 'currency') {
       val.amount = null;
+    }
+
+    // Mark computed cells as manually overridden
+    const isComputedRow = row.isSubtotal || row.isPepm || updated.sections[sectionIndex].name === 'Totals';
+    if (isComputedRow) {
+      val.isManualOverride = true;
     }
 
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
@@ -498,6 +529,7 @@ export default function AnalysisPage() {
                 onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
                 onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
                 onRowReorder={canEdit ? handleRowReorder : undefined}
+                onClearOverride={canEdit ? handleClearOverride : undefined}
               />
             </div>
 
