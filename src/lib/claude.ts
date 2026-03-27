@@ -239,6 +239,7 @@ CONSENSUS MODULE CATEGORIES (map vendor modules to these):
 - Compensation Management (include only if at least one vendor has it)
 
 For Software Fees, add a "Software Subtotal" row at the end.
+Immediately after the "Software Subtotal" row, add an "Effective PEPM" row with id "software_pepm", label "Effective PEPM", and isSubtotal set to false (so it remains editable). For each vendor, calculate: amount = (that vendor's Software Subtotal amount) / normalizedHeadcount / 12, rounded to 2 decimal places. Format display as "$X.XX/mo". Set note to "Annual Software Fees / <normalizedHeadcount> employees / 12 months". Set isConfirmed to match the vendor's Software Subtotal isConfirmed value. If normalizedHeadcount is null or the vendor's Software Subtotal amount is null, set amount to null and display to "N/A". This row is purely informational — do NOT include it in any subtotal, total, or downstream calculation.
 For Implementation Fees rows, consider: Total Implementation, GL Integration, Carrier Feeds, 401k Integration, Historical Data Conversion, Project Manager, Training.
 For Service Fees rows, consider: Tax Filing, COBRA Admin, HSA/FSA Admin, Integration Maintenance.
 Only include rows where at least one vendor has data.

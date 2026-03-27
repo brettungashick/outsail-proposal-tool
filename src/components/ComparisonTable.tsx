@@ -117,6 +117,7 @@ function SectionBlock({
       </tr>
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
+        const isPepmRow = row.id === 'software_pepm';
 
         return (
           <tr
@@ -124,9 +125,11 @@ function SectionBlock({
             className={`${
               row.isSubtotal
                 ? 'bg-slate-50 font-semibold'
-                : isDiscountRow
-                  ? 'bg-amber-50/30'
-                  : 'hover:bg-slate-50/50'
+                : isPepmRow
+                  ? 'bg-blue-50/40 italic text-slate-600'
+                  : isDiscountRow
+                    ? 'bg-amber-50/30'
+                    : 'hover:bg-slate-50/50'
             }`}
           >
             <td className="px-4 py-2 border border-slate-200 text-sm text-slate-700">
