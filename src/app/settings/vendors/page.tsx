@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 
 interface Vendor {
   id: string;
@@ -118,16 +118,14 @@ export default function VendorSettingsPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -339,6 +337,6 @@ export default function VendorSettingsPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

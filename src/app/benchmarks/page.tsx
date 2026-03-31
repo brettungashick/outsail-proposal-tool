@@ -3,7 +3,7 @@
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useRef } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 
 interface VendorOption {
   id: string;
@@ -104,16 +104,14 @@ export default function BenchmarksPage() {
 
   if (status === 'loading') {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-slate-900">Benchmarks</h1>
@@ -375,6 +373,6 @@ export default function BenchmarksPage() {
           </div>
         )}
       </div>
-    </div>
+    </Sidebar>
   );
 }

@@ -8,6 +8,7 @@ export interface VendorValue {
   isConfirmed: boolean;
   status?: CellStatus;
   isManualOverride?: boolean;
+  audit?: CellAudit;
 }
 
 export interface TableRow {
@@ -99,6 +100,32 @@ export type DiscountToggles = Record<string, Record<string, boolean>>;
 
 // Hidden row toggle state: { "rowId": true } — rows hidden for standardization
 export type HiddenRows = Record<string, boolean>;
+
+export interface SourcePointer {
+  documentId: string;
+  documentName: string;
+  vendorName: string;
+  label: string;
+  charOffsetStart: number;
+  charOffsetEnd: number;
+}
+
+export interface CellAudit {
+  sources: SourcePointer[];
+  override: { oldDisplay: string; oldAmount: number | null; userId: string; timestamp: string } | null;
+  formula: string | null;
+  playbookRuleId?: string;
+  playbookRuleVersion?: number;
+}
+
+export interface CellAuditEvent {
+  type: string;
+  timestamp: string;
+  cellPath: string;
+  userId: string | null;
+  display: string;
+  amount: number | null;
+}
 
 export interface ClarifyingQuestion {
   id: string;
