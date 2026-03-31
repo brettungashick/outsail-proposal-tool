@@ -368,6 +368,7 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
   const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
 
   let cleanText = responseText.trim();
+  // Strip markdown code fences if present
   if (cleanText.startsWith('```')) {
     cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
   }
@@ -377,6 +378,8 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
   if (firstBrace > 0) {
     cleanText = cleanText.slice(firstBrace);
   }
+
+  // Find the last closing brace to handle truncation or trailing content
   const lastBrace = cleanText.lastIndexOf('}');
   if (lastBrace > 0 && lastBrace < cleanText.length - 1) {
     cleanText = cleanText.slice(0, lastBrace + 1);
