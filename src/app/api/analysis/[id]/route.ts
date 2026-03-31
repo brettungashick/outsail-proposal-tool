@@ -1,7 +1,37 @@
 import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
+import { z } from 'zod';
+import { createHash } from 'crypto';
 import { prisma } from '@/lib/prisma';
+
+const ALLOWED_FIELD_TYPES = [
+  'comparisonData',
+  'standardizationNotes',
+  'vendorNotes',
+  'nextSteps',
+  'discountToggles',
+  'hiddenRows',
+] as const;
+
+const analysisUpdateSchema = z.object({
+  fieldPath: z.string().min(1, 'fieldPath is required'),
+  oldValue: z.unknown(),
+  newValue: z.unknown(),
+  fieldType: z.enum(ALLOWED_FIELD_TYPES, {
+    error: `fieldType must be one of: ${ALLOWED_FIELD_TYPES.join(', ')}`,
+  }),
+});
+
+// Cap stored audit values at 4KB; store hash if larger
+const MAX_AUDIT_VALUE_SIZE = 4 * 1024;
+
+function capValue(value: unknown): string {
+  const str = typeof value === 'string' ? value : JSON.stringify(value);
+  if (str.length <= MAX_AUDIT_VALUE_SIZE) return str;
+  const hash = createHash('sha256').update(str).digest('hex').slice(0, 16);
+  return `[truncated:${hash}:${str.length}bytes]`;
+}
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
@@ -32,7 +62,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   const userId = (session.user as { id: string }).id;
   const body = await req.json();
-  const { fieldPath, oldValue, newValue, fieldType } = body;
+  const parsed = analysisUpdateSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Invalid request', details: parsed.error.flatten().fieldErrors },
+      { status: 400 },
+    );
+  }
+
+  const { fieldPath, oldValue, newValue, fieldType } = parsed.data;
 
   // Validate the analysis exists
   const analysis = await prisma.analysis.findUnique({
@@ -43,40 +81,26 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
-  // Record the edit
+  // Build update payload
+  const newValueStr = typeof newValue === 'string' ? newValue : JSON.stringify(newValue);
+  const updateData: Record<string, string> = { [fieldType]: newValueStr };
+
+  // Update FIRST, then log — so edits are only logged on success
+  await prisma.analysis.update({
+    where: { id: params.id },
+    data: updateData,
+  });
+
+  // Log the edit with capped values
   await prisma.analysisEdit.create({
     data: {
       analysisId: params.id,
-      fieldPath,
-      oldValue: String(oldValue),
-      newValue: String(newValue),
+      fieldPath: fieldType === 'comparisonData' ? (fieldPath || 'comparisonData') : fieldPath,
+      oldValue: capValue(oldValue),
+      newValue: capValue(newValue),
       editedBy: userId,
     },
   });
-
-  // Update the relevant field in the analysis
-  const updateData: Record<string, string> = {};
-
-  if (fieldType === 'comparisonData') {
-    updateData.comparisonData = newValue;
-  } else if (fieldType === 'standardizationNotes') {
-    updateData.standardizationNotes = newValue;
-  } else if (fieldType === 'vendorNotes') {
-    updateData.vendorNotes = newValue;
-  } else if (fieldType === 'nextSteps') {
-    updateData.nextSteps = newValue;
-  } else if (fieldType === 'discountToggles') {
-    updateData.discountToggles = newValue;
-  } else if (fieldType === 'hiddenRows') {
-    updateData.hiddenRows = newValue;
-  }
-
-  if (Object.keys(updateData).length > 0) {
-    await prisma.analysis.update({
-      where: { id: params.id },
-      data: updateData,
-    });
-  }
 
   return NextResponse.json({ success: true });
 }

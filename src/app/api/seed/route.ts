@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 
+/**
+ * Seed route is disabled in production. Use the CLI seeding mechanism instead:
+ *   npm run db:seed
+ *
+ * This route always returns 404 in production, regardless of ALLOW_SEED.
+ * In non-production, it requires ALLOW_SEED=true AND an authenticated admin session.
+ */
 export async function GET() {
   try {
     // Create tables if they don't exist
