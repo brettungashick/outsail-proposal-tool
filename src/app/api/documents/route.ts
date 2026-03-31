@@ -14,12 +14,14 @@ export async function POST(req: NextRequest) {
   const userRole = (session.user as { role?: string }).role;
 
   const formData = await req.formData();
-  const file = formData.get('file') as File;
+  const file = formData.get('file') as File | null;
+  const pastedRawText = formData.get('rawText') as string | null;
   const vendorName = formData.get('vendorName') as string;
   const projectId = formData.get('projectId') as string;
   const documentType = (formData.get('documentType') as string) || 'initial_quote';
+  const fileName = (formData.get('fileName') as string) || '';
 
-  if (!file || !vendorName || !projectId) {
+  if ((!file && !pastedRawText) || !vendorName || !projectId) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
 
@@ -31,27 +33,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
-  const fileType = getFileType(file.name);
-
-  // Extract text from file in memory (no disk write needed)
-  const bytes = await file.arrayBuffer();
-  const buffer = Buffer.from(bytes);
-
   let rawText = '';
+  let fileType = 'text';
+  let resolvedFileName = fileName;
   let extractionWarning: string | null = null;
-  try {
-    rawText = await extractTextFromBuffer(buffer, fileType);
-    // Validate extraction produced meaningful content
-    if (!rawText || rawText.trim().length < 50) {
+
+  if (pastedRawText) {
+    // Pasted text input — no file parsing needed
+    rawText = pastedRawText;
+    resolvedFileName = resolvedFileName || `${vendorName} - Pasted Content.txt`;
+  } else if (file) {
+    fileType = getFileType(file.name);
+    resolvedFileName = resolvedFileName || file.name;
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+    try {
+      rawText = await extractTextFromBuffer(buffer, fileType);
+      // Validate extraction produced meaningful content
+      if (!rawText || rawText.trim().length < 50) {
+        extractionWarning =
+          'Text extraction produced little or no content. The file may be image-based (scanned), password-protected, or corrupted. The AI analysis may produce incomplete results for this vendor.';
+        rawText = '';
+      }
+    } catch (error) {
+      console.error('Text extraction error:', error);
       extractionWarning =
-        'Text extraction produced little or no content. The file may be image-based (scanned), password-protected, or corrupted. The AI analysis may produce incomplete results for this vendor.';
+        'Failed to extract text from this file. The AI analysis may produce incomplete results for this vendor. Consider re-uploading in a different format.';
       rawText = '';
     }
-  } catch (error) {
-    console.error('Text extraction error:', error);
-    extractionWarning =
-      'Failed to extract text from this file. The AI analysis may produce incomplete results for this vendor. Consider re-uploading in a different format.';
-    rawText = '';
   }
 
   // Compute quoteVersion for updated quotes
@@ -91,8 +100,8 @@ export async function POST(req: NextRequest) {
     data: {
       projectId,
       vendorName,
-      fileName: file.name,
-      filePath: file.name,
+      fileName: resolvedFileName,
+      filePath: resolvedFileName,
       fileType,
       rawText,
       documentType,
