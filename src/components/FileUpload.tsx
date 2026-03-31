@@ -64,6 +64,12 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
     e.preventDefault();
     if (!file || !vendorName.trim()) return;
 
+    // Vercel serverless functions have a 4.5 MB body limit
+    if (file.size > 4 * 1024 * 1024) {
+      setError('File is too large. Please upload a file under 4 MB.');
+      return;
+    }
+
     setUploading(true);
     setError('');
 
@@ -76,8 +82,18 @@ export default function FileUpload({ projectId, onUploadComplete }: FileUploadPr
     try {
       const res = await fetch('/api/documents', { method: 'POST', body: formData });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Upload failed');
+        let message = 'Upload failed';
+        try {
+          const data = await res.json();
+          message = data.error || message;
+        } catch {
+          if (res.status === 413) {
+            message = 'File is too large. Please upload a file under 4 MB.';
+          } else {
+            message = `Upload failed (${res.status})`;
+          }
+        }
+        throw new Error(message);
       }
       setVendorName('');
       setDocumentType('initial_quote');
