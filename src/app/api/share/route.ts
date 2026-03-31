@@ -4,6 +4,7 @@ import { projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { getAppBaseUrl, emailDomain, getSessionUser } from '@/lib/access';
 import { sendShareEmail } from '@/lib/email';
+import { validateBody, shareCreateSchema } from '@/lib/schemas';
 
 // One-time migration: ensure ShareLink columns exist in Turso
 let _migrated = false;
@@ -29,11 +30,9 @@ export async function POST(req: NextRequest) {
     const userId = user.id;
     const userRole = user.role;
     const body = await req.json();
-    const { projectId, email } = body;
-
-    if (!email) {
-      return NextResponse.json({ error: 'Recipient email is required' }, { status: 400 });
-    }
+    const validated = validateBody(shareCreateSchema, body);
+    if (!validated.success) return validated.response;
+    const { projectId, email } = validated.data;
 
     // Verify project belongs to user or user is admin
     const project = await prisma.project.findFirst({

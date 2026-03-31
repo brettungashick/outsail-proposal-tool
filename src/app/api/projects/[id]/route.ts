@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, projectUpdateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getSessionUser();
@@ -78,14 +79,16 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const userId = user.id;
   const userRole = user.role;
   const body = await req.json();
+  const validated = validateBody(projectUpdateSchema, body);
+  if (!validated.success) return validated.response;
 
   const project = await prisma.project.updateMany({
     where: projectWhereOwnerOrAdmin(params.id, userId, userRole),
     data: {
-      name: body.name,
-      clientName: body.clientName,
-      clientEmail: body.clientEmail,
-      status: body.status,
+      name: validated.data.name,
+      clientName: validated.data.clientName,
+      clientEmail: validated.data.clientEmail,
+      status: validated.data.status,
     },
   });
 

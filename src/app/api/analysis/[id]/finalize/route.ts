@@ -3,6 +3,7 @@ import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { generateComparison, isApiKeyConfigured } from '@/lib/claude';
 import { ParsedProposal } from '@/types';
+import { validateBody, analysisFinalizeSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getSessionUser();
@@ -31,7 +32,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const body = await req.json();
-  const { answers } = body as { answers: Record<string, string> };
+  const validated = validateBody(analysisFinalizeSchema, body);
+  if (!validated.success) return validated.response;
+  const { answers } = validated.data;
 
   // Save advisor answers
   await prisma.analysis.update({

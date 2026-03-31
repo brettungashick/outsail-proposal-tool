@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, learningEventPatchSchema } from '@/lib/schemas';
 
 export async function PATCH(
   req: NextRequest,
@@ -15,11 +16,9 @@ export async function PATCH(
   const userRole = user.role;
   const { id } = await params;
   const body = await req.json();
-  const { promotedToRuleId } = body;
-
-  if (!promotedToRuleId) {
-    return NextResponse.json({ error: 'promotedToRuleId is required' }, { status: 400 });
-  }
+  const validated = validateBody(learningEventPatchSchema, body);
+  if (!validated.success) return validated.response;
+  const { promotedToRuleId } = validated.data;
 
   // Verify the event exists and belongs to this user
   const event = await prisma.learningEvent.findUnique({ where: { id } });

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { validateBody, changePasswordSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,15 +12,10 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = sessionUser.id;
-    const { currentPassword, newPassword } = await req.json();
-
-    if (!currentPassword || !newPassword) {
-      return NextResponse.json({ error: 'Current and new passwords are required' }, { status: 400 });
-    }
-
-    if (newPassword.length < 8) {
-      return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 });
-    }
+    const body = await req.json();
+    const validated = validateBody(changePasswordSchema, body);
+    if (!validated.success) return validated.response;
+    const { currentPassword, newPassword } = validated.data;
 
     // Look up by session ID first, fall back to email
     let user = await prisma.user.findUnique({ where: { id: userId } });

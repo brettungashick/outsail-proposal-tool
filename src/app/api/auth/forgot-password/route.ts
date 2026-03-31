@@ -3,22 +3,21 @@ import { prisma } from '@/lib/prisma';
 import { getAppBaseUrl } from '@/lib/access';
 import { sendPasswordResetEmail } from '@/lib/email';
 import { randomBytes } from 'crypto';
+import { validateBody, forgotPasswordSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const email = body?.email;
-
-    if (!email) {
-      return NextResponse.json({ error: 'Email is required' }, { status: 400 });
-    }
+    const validated = validateBody(forgotPasswordSchema, body);
+    if (!validated.success) return validated.response;
+    const { email } = validated.data;
 
     // Always return success to prevent email enumeration
     const successResponse = NextResponse.json({
       message: 'If an account with that email exists, a password reset link has been sent.',
     });
 
-    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user || user.inviteStatus === 'pending') {
       return successResponse;
     }

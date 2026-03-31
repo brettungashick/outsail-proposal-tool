@@ -4,6 +4,7 @@ import { sendInviteEmail } from '@/lib/email';
 import { getAppBaseUrl, getSessionUser } from '@/lib/access';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
+import { validateBody, userCreateSchema } from '@/lib/schemas';
 
 export async function GET() {
   const user = await getSessionUser();
@@ -39,11 +40,9 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { email, name } = body;
-
-  if (!email || !name) {
-    return NextResponse.json({ error: 'Email and name are required' }, { status: 400 });
-  }
+  const validated = validateBody(userCreateSchema, body);
+  if (!validated.success) return validated.response;
+  const { email, name } = validated.data;
 
   // Check if email already exists
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -59,7 +58,7 @@ export async function POST(req: NextRequest) {
 
   const newUser = await prisma.user.create({
     data: {
-      email: email.toLowerCase().trim(),
+      email,
       name: name.trim(),
       passwordHash: tempHash,
       role: 'advisor',

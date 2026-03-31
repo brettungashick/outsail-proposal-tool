@@ -75,6 +75,89 @@ export const documentUploadSchema = z.object({
   fileName: z.string().optional().default(''),
 });
 
+// ── Project update schema ──
+
+export const projectUpdateSchema = z.object({
+  name: z.string().min(1).optional(),
+  clientName: z.string().min(1).optional(),
+  clientEmail: z.string().email().optional().or(z.literal('')).or(z.null()),
+  status: z.enum(['draft', 'analyzing', 'clarifying', 'complete']).optional(),
+});
+
+// ── Analysis update schema ──
+
+const ALLOWED_FIELD_TYPES = [
+  'comparisonData',
+  'standardizationNotes',
+  'vendorNotes',
+  'nextSteps',
+  'discountToggles',
+  'hiddenRows',
+] as const;
+
+export const analysisUpdateSchema = z.object({
+  fieldPath: z.string().min(1, 'fieldPath is required'),
+  oldValue: z.unknown(),
+  newValue: z.unknown(),
+  fieldType: z.enum(ALLOWED_FIELD_TYPES, {
+    error: `fieldType must be one of: ${ALLOWED_FIELD_TYPES.join(', ')}`,
+  }),
+});
+
+// ── Document update schema ──
+
+export const documentUpdateSchema = z.object({
+  isActive: z.boolean(),
+});
+
+// ── Invite accept schema ──
+
+export const inviteAcceptSchema = z.object({
+  password: passwordSchema,
+});
+
+// ── Learning event schemas ──
+
+export const learningEventCreateSchema = z.object({
+  analysisId: z.string().min(1),
+  projectId: z.string().min(1),
+  vendorName: z.string().min(1),
+  rowId: z.string().min(1),
+  colId: z.string().optional(),
+  sectionName: z.string().min(1),
+  vendorIndex: z.number().int().nonnegative().optional().default(0),
+  editType: z.enum(['value_change', 'status_change', 'label_change']),
+  oldDisplay: z.string().optional().default(''),
+  oldAmount: z.number().nullable().optional(),
+  oldStatus: z.string().nullable().optional(),
+  newDisplay: z.string().optional().default(''),
+  newAmount: z.number().nullable().optional(),
+  newStatus: z.string().nullable().optional(),
+  rowLabel: z.string().min(1),
+  reasonTag: z.string().nullable().optional(),
+});
+
+export const learningEventPatchSchema = z.object({
+  promotedToRuleId: z.string().min(1, 'promotedToRuleId is required'),
+});
+
+// ── Playbook schema ──
+
+export const playbookCreateSchema = z.object({
+  vendorName: z.string().min(1),
+  name: z.string().min(1),
+  conditionType: z.enum(['contains', 'regex']),
+  conditionValue: z.string().min(1),
+  conditionField: z.enum(['label', 'section', 'display']),
+  actionType: z.enum(['set_status', 'add_note']),
+  actionValue: z.string().min(1).refine((v) => {
+    try { JSON.parse(v); return true; } catch { return false; }
+  }, 'actionValue must be valid JSON'),
+  examples: z.string().nullable().optional(),
+  confidence: z.enum(['sure', 'maybe']).optional().default('sure'),
+  createdFromEventId: z.string().nullable().optional(),
+});
+
 // ── Shared enums ──
 
 export const projectStatusEnum = z.enum(['draft', 'analyzing', 'clarifying', 'complete']);

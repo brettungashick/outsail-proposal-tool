@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/access';
+import { validateBody, playbookCreateSchema } from '@/lib/schemas';
 
 function toVendorKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -14,21 +14,6 @@ async function ensurePlaybookColumns() {
   try { await prisma.$executeRawUnsafe(`ALTER TABLE "VendorPlaybookRule" ADD COLUMN "vendorKey" TEXT`); } catch { /* exists */ }
   _migrated = true;
 }
-
-const playbookCreateSchema = z.object({
-  vendorName: z.string().min(1),
-  name: z.string().min(1),
-  conditionType: z.enum(['contains', 'regex']),
-  conditionValue: z.string().min(1),
-  conditionField: z.enum(['label', 'section', 'display']),
-  actionType: z.enum(['set_status', 'add_note']),
-  actionValue: z.string().min(1).refine((v) => {
-    try { JSON.parse(v); return true; } catch { return false; }
-  }, 'actionValue must be valid JSON'),
-  examples: z.string().nullable().optional(),
-  confidence: z.enum(['sure', 'maybe']).optional().default('sure'),
-  createdFromEventId: z.string().nullable().optional(),
-});
 
 export async function GET(req: NextRequest) {
   const sessionUser = await getSessionUser();
@@ -67,15 +52,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const parsed = playbookCreateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
-      { status: 400 },
-    );
-  }
+  const validated = validateBody(playbookCreateSchema, body);
+  if (!validated.success) return validated.response;
 
-  const data = parsed.data;
+  const data = validated.data;
 
   // Validate regex compiles
   if (data.conditionType === 'regex') {

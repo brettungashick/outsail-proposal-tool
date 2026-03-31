@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
+import { validateBody, learningEventCreateSchema } from '@/lib/schemas';
 
 function toVendorKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
@@ -20,25 +20,6 @@ async function ensureLearningEventColumns() {
   _migrated = true;
 }
 
-const learningEventSchema = z.object({
-  analysisId: z.string().min(1),
-  projectId: z.string().min(1),
-  vendorName: z.string().min(1),
-  rowId: z.string().min(1),
-  colId: z.string().optional(),
-  sectionName: z.string().min(1),
-  vendorIndex: z.number().int().nonnegative().optional().default(0),
-  editType: z.enum(['value_change', 'status_change', 'label_change']),
-  oldDisplay: z.string().optional().default(''),
-  oldAmount: z.number().nullable().optional(),
-  oldStatus: z.string().nullable().optional(),
-  newDisplay: z.string().optional().default(''),
-  newAmount: z.number().nullable().optional(),
-  newStatus: z.string().nullable().optional(),
-  rowLabel: z.string().min(1),
-  reasonTag: z.string().nullable().optional(),
-});
-
 export async function POST(req: NextRequest) {
   await ensureLearningEventColumns();
 
@@ -48,15 +29,10 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const parsed = learningEventSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Validation failed', details: parsed.error.flatten().fieldErrors },
-      { status: 400 },
-    );
-  }
+  const validated = validateBody(learningEventCreateSchema, body);
+  if (!validated.success) return validated.response;
 
-  const data = parsed.data;
+  const data = validated.data;
 
   // Verify user has access to this analysis
   const hasAccess = await requireAnalysisAccess(data.analysisId, sessionUser.id, sessionUser.role);

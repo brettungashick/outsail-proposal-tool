@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, vendorUpdateSchema } from '@/lib/schemas';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getSessionUser();
@@ -14,14 +15,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   }
 
   const body = await req.json();
-  const { name, logoUrl, accentColor } = body;
+  const validated = validateBody(vendorUpdateSchema, body);
+  if (!validated.success) return validated.response;
 
   const vendor = await prisma.vendor.update({
     where: { id: params.id },
     data: {
-      ...(name !== undefined && { name: name.trim() }),
-      ...(logoUrl !== undefined && { logoUrl: logoUrl || null }),
-      ...(accentColor !== undefined && { accentColor: accentColor || null }),
+      ...(validated.data.name !== undefined && { name: validated.data.name }),
+      ...(validated.data.logoUrl !== undefined && { logoUrl: validated.data.logoUrl || null }),
+      ...(validated.data.accentColor !== undefined && { accentColor: validated.data.accentColor || null }),
     },
   });
 

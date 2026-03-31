@@ -3,6 +3,7 @@ import { projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
+import { validateBody, analysisCreateSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
@@ -13,7 +14,9 @@ export async function POST(req: NextRequest) {
   const userId = user.id;
   const userRole = user.role;
   const body = await req.json();
-  const { projectId } = body;
+  const validated = validateBody(analysisCreateSchema, body);
+  if (!validated.success) return validated.response;
+  const { projectId } = validated.data;
 
   // Verify project belongs to user or user is admin
   const project = await prisma.project.findFirst({

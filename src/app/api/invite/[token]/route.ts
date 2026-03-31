@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { validateBody, inviteAcceptSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest, { params }: { params: { token: string } }) {
   const user = await prisma.user.findUnique({
@@ -17,11 +18,9 @@ export async function GET(req: NextRequest, { params }: { params: { token: strin
 
 export async function POST(req: NextRequest, { params }: { params: { token: string } }) {
   const body = await req.json();
-  const { password } = body;
-
-  if (!password || password.length < 8) {
-    return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
-  }
+  const validated = validateBody(inviteAcceptSchema, body);
+  if (!validated.success) return validated.response;
+  const { password } = validated.data;
 
   const user = await prisma.user.findUnique({
     where: { inviteToken: params.token },

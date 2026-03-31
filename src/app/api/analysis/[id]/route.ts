@@ -1,26 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/access';
-import { z } from 'zod';
 import { createHash } from 'crypto';
 import { prisma } from '@/lib/prisma';
-
-const ALLOWED_FIELD_TYPES = [
-  'comparisonData',
-  'standardizationNotes',
-  'vendorNotes',
-  'nextSteps',
-  'discountToggles',
-  'hiddenRows',
-] as const;
-
-const analysisUpdateSchema = z.object({
-  fieldPath: z.string().min(1, 'fieldPath is required'),
-  oldValue: z.unknown(),
-  newValue: z.unknown(),
-  fieldType: z.enum(ALLOWED_FIELD_TYPES, {
-    error: `fieldType must be one of: ${ALLOWED_FIELD_TYPES.join(', ')}`,
-  }),
-});
+import { validateBody, analysisUpdateSchema } from '@/lib/schemas';
 
 // Cap stored audit values at 4KB; store hash if larger
 const MAX_AUDIT_VALUE_SIZE = 4 * 1024;
@@ -61,15 +43,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 
   const userId = user.id;
   const body = await req.json();
-  const parsed = analysisUpdateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid request', details: parsed.error.flatten().fieldErrors },
-      { status: 400 },
-    );
-  }
+  const validated = validateBody(analysisUpdateSchema, body);
+  if (!validated.success) return validated.response;
 
-  const { fieldPath, oldValue, newValue, fieldType } = parsed.data;
+  const { fieldPath, oldValue, newValue, fieldType } = validated.data;
 
   // Validate the analysis exists
   const analysis = await prisma.analysis.findUnique({

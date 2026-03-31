@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { validateBody, resetPasswordSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
   try {
@@ -27,11 +28,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { token, password } = await req.json();
-
-    if (!token || !password || password.length < 8) {
-      return NextResponse.json({ error: 'Token and password (8+ characters) are required' }, { status: 400 });
-    }
+    const body = await req.json();
+    const validated = validateBody(resetPasswordSchema, body);
+    if (!validated.success) return validated.response;
+    const { token, password } = validated.data;
 
     const user = await prisma.user.findUnique({
       where: { passwordResetToken: token },
