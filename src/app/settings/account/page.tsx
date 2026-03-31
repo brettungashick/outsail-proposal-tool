@@ -166,7 +166,7 @@ export default function AccountSettingsPage() {
               {/* Current logo preview */}
               <div className="w-40 h-16 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
                 {logoUrl ? (
-                  <Image src={logoUrl} alt="Current logo" width={140} height={50} style={{ objectFit: 'contain' }} />
+                  <Image src={logoUrl} alt="Current logo" width={140} height={50} style={{ objectFit: 'contain' }} unoptimized={logoUrl.startsWith('data:')} />
                 ) : (
                   <span className="text-sm text-slate-400">No logo uploaded</span>
                 )}

@@ -9,6 +9,7 @@ import DocumentList from '@/components/DocumentList';
 import ShareManager from '@/components/ShareManager';
 import ClarifyingReview from '@/components/ClarifyingReview';
 import AnalysisLoadingOverlay from '@/components/AnalysisLoadingOverlay';
+import Sidebar from '@/components/Sidebar';
 
 interface Document {
   id: string;
@@ -173,8 +174,7 @@ export default function ProjectPage() {
   const canEdit = project.isOwner || project.isAdmin;
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       {analyzing && <AnalysisLoadingOverlay />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
@@ -410,6 +410,6 @@ export default function ProjectPage() {
           </div>
         </div>
       )}
-    </div>
+    </Sidebar>
   );
 }

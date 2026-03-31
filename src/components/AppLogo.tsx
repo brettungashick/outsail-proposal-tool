@@ -28,6 +28,7 @@ export default function AppLogo({ width = 140, height = 36, className }: AppLogo
   }
 
   if (logoUrl) {
+    const isDataUrl = logoUrl.startsWith('data:');
     return (
       <Image
         src={logoUrl}
@@ -37,6 +38,7 @@ export default function AppLogo({ width = 140, height = 36, className }: AppLogo
         className={className}
         style={{ objectFit: 'contain' }}
         priority
+        unoptimized={isDataUrl}
       />
     );
   }
