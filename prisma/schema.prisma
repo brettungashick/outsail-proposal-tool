@@ -72,6 +72,7 @@ model Analysis {
   parsedProposals      String?        // JSON: stored parsed proposals for finalization
   clarifyingQuestions  String?        // JSON: AI-generated questions
   advisorAnswers       String?        // JSON: advisor responses to questions
+  analysisProgress     String?        // JSON: progress tracking for async processing
   createdBy            String
   createdAt            DateTime       @default(now())
   edits                AnalysisEdit[]

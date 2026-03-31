@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { projectWhereOwnerOrAdmin } from '@/lib/auth';
-import { getSessionUser } from '@/lib/access';
+import { getSessionUser, getAppBaseUrl } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
-import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
+import { isApiKeyConfigured } from '@/lib/claude';
 import { validateBody, analysisCreateSchema } from '@/lib/schemas';
 
 export async function POST(req: NextRequest) {
@@ -47,33 +47,111 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Determine version number
+  const lastAnalysis = await prisma.analysis.findFirst({
+    where: { projectId },
+    orderBy: { version: 'desc' },
+  });
+  const version = (lastAnalysis?.version || 0) + 1;
+
+  // Create draft analysis
+  const analysis = await prisma.analysis.create({
+    data: {
+      projectId,
+      version,
+      status: 'draft',
+      comparisonData: '{}',
+      createdBy: userId,
+      analysisProgress: JSON.stringify({
+        stage: 'queued',
+        message: 'Analysis queued...',
+      }),
+    },
+  });
+
   // Update project status
   await prisma.project.update({
     where: { id: projectId },
     data: { status: 'analyzing' },
   });
 
-  try {
-    // Group active documents by vendor and merge text from multiple files
-    const vendorDocs: Record<string, typeof activeDocs> = {};
-    for (const doc of activeDocs) {
-      if (!vendorDocs[doc.vendorName]) vendorDocs[doc.vendorName] = [];
-      vendorDocs[doc.vendorName].push(doc);
-    }
+  // Fire-and-forget: trigger background processing
+  const baseUrl = getAppBaseUrl(req.headers);
+  const processSecret = process.env.ANALYSIS_SECRET;
+  if (processSecret) {
+    fetch(`${baseUrl}/api/analysis/${analysis.id}/process`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${processSecret}`,
+      },
+      body: JSON.stringify({ mode: 'parse' }),
+    }).catch((err) => console.error('Failed to trigger analysis processing:', err));
+  } else {
+    // Fallback: run synchronously (for dev without ANALYSIS_SECRET)
+    console.warn('ANALYSIS_SECRET not set — running analysis synchronously.');
+    const { parseProposal, generateClarifyingQuestions } = await import('@/lib/claude');
+    try {
+      const vendorDocs: Record<string, typeof activeDocs> = {};
+      for (const doc of activeDocs) {
+        if (!vendorDocs[doc.vendorName]) vendorDocs[doc.vendorName] = [];
+        vendorDocs[doc.vendorName].push(doc);
+      }
 
-    // Step 1: Parse each vendor's combined documents with Claude
-    const parsedProposals = [];
-    const failedVendors: string[] = [];
-    for (const [vendor, docs] of Object.entries(vendorDocs)) {
-      try {
-        // Check if all docs have meaningful extracted text
-        const hasValidText = docs.some(
-          (d) => d.rawText && d.rawText.trim().length > 50 && d.rawText !== 'Error extracting text from file'
-        );
+      const parsedProposals = [];
+      for (const [vendor, docs] of Object.entries(vendorDocs)) {
+        try {
+          const hasValidText = docs.some(
+            (d) => d.rawText && d.rawText.trim().length > 50 && d.rawText !== 'Error extracting text from file'
+          );
 
-        if (!hasValidText) {
-          console.error(`Vendor ${vendor}: All documents have empty or invalid extracted text`);
-          failedVendors.push(vendor);
+          if (!hasValidText) {
+            console.error(`Vendor ${vendor}: All documents have empty or invalid extracted text`);
+            parsedProposals.push({
+              vendorName: vendor,
+              documentId: docs[0].id,
+              documentName: docs[0].fileName,
+              headcount: null,
+              contractTermMonths: null,
+              modules: [],
+              implementationItems: [],
+              serviceItems: [],
+              discounts: [],
+              notableTerms: [],
+              unknowns: ['Document text extraction failed. All values must be entered manually.'],
+            });
+            continue;
+          }
+
+          const allParsed = docs.every((d) => d.parsedData);
+          if (allParsed && docs.length === 1) {
+            const doc = docs[0];
+            parsedProposals.push({
+              ...JSON.parse(doc.parsedData!),
+              documentId: doc.id,
+              documentName: doc.fileName,
+            });
+          } else {
+            const mergedText = docs
+              .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
+              .join('\n\n');
+            const primaryDoc = docs[0];
+            const parsed = await parseProposal(
+              mergedText,
+              vendor,
+              primaryDoc.id,
+              docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
+            );
+            for (const doc of docs) {
+              await prisma.document.update({
+                where: { id: doc.id },
+                data: { parsedData: JSON.stringify(parsed) },
+              });
+            }
+            parsedProposals.push(parsed);
+          }
+        } catch (vendorError) {
+          console.error(`Failed to parse vendor ${vendor}:`, vendorError);
           parsedProposals.push({
             vendorName: vendor,
             documentId: docs[0].id,
@@ -85,127 +163,51 @@ export async function POST(req: NextRequest) {
             serviceItems: [],
             discounts: [],
             notableTerms: [],
-            unknowns: ['Document text extraction failed. All values must be entered manually.'],
+            unknowns: [
+              `Failed to parse proposal: ${vendorError instanceof Error ? vendorError.message : 'Unknown error'}`,
+            ],
           });
-          continue;
         }
-
-        // Check if all docs for this vendor are already parsed individually
-        const allParsed = docs.every((d) => d.parsedData);
-        if (allParsed && docs.length === 1) {
-          // Single doc, already parsed — reuse
-          const doc = docs[0];
-          parsedProposals.push({
-            ...JSON.parse(doc.parsedData!),
-            documentId: doc.id,
-            documentName: doc.fileName,
-          });
-        } else {
-          // Merge raw text from all docs for this vendor
-          const mergedText = docs
-            .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
-            .join('\n\n');
-
-          const primaryDoc = docs[0];
-          const parsed = await parseProposal(
-            mergedText,
-            vendor,
-            primaryDoc.id,
-            docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
-          );
-
-          // Save parsed data to each individual doc
-          for (const doc of docs) {
-            await prisma.document.update({
-              where: { id: doc.id },
-              data: { parsedData: JSON.stringify(parsed) },
-            });
-          }
-          parsedProposals.push(parsed);
-        }
-      } catch (vendorError) {
-        console.error(`Failed to parse vendor ${vendor}:`, vendorError);
-        failedVendors.push(vendor);
-        parsedProposals.push({
-          vendorName: vendor,
-          documentId: docs[0].id,
-          documentName: docs[0].fileName,
-          headcount: null,
-          contractTermMonths: null,
-          modules: [],
-          implementationItems: [],
-          serviceItems: [],
-          discounts: [],
-          notableTerms: [],
-          unknowns: [
-            `Failed to parse proposal: ${vendorError instanceof Error ? vendorError.message : 'Unknown error'}`,
-          ],
-        });
       }
-    }
 
-    // Verify at least some vendors parsed successfully
-    if (parsedProposals.length === 0) {
-      throw new Error('All vendor proposals failed to parse. Please check your uploaded documents.');
-    }
-
-    // Step 2: Generate clarifying questions (two-pass flow)
-    const questions = await generateClarifyingQuestions(parsedProposals);
-
-    // Step 3: Determine version number
-    const lastAnalysis = await prisma.analysis.findFirst({
-      where: { projectId },
-      orderBy: { version: 'desc' },
-    });
-    const version = (lastAnalysis?.version || 0) + 1;
-
-    // Step 4: Save analysis in clarifying state (not complete yet)
-    const analysis = await prisma.analysis.create({
-      data: {
-        projectId,
-        version,
-        status: 'clarifying',
-        comparisonData: '{}',
-        parsedProposals: JSON.stringify(parsedProposals),
-        clarifyingQuestions: JSON.stringify(questions),
-        createdBy: userId,
-      },
-    });
-
-    // Update project status to clarifying
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'clarifying' },
-    });
-
-    return NextResponse.json(analysis, { status: 201 });
-  } catch (error: unknown) {
-    console.error('Analysis generation error:', error);
-    await prisma.project.update({
-      where: { id: projectId },
-      data: { status: 'draft' },
-    });
-
-    let message = 'An unexpected error occurred during analysis.';
-    let status = 500;
-
-    if (error instanceof Error && 'status' in error) {
-      const apiError = error as Error & { status: number };
-      if (apiError.status === 401) {
-        message = 'Invalid Anthropic API key. Please check your configuration.';
-        status = 401;
-      } else if (apiError.status === 429) {
-        message = 'Rate limit exceeded. Please wait a moment and try again.';
-        status = 429;
-      } else {
-        message = `Anthropic API error (${apiError.status}): ${apiError.message}`;
+      if (parsedProposals.length === 0) {
+        throw new Error('All vendor proposals failed to parse.');
       }
-    } else if (error instanceof SyntaxError) {
-      message = 'Failed to parse the AI response. Please try again.';
-    } else if (error instanceof Error) {
-      message = `Analysis failed: ${error.message}`;
-    }
 
-    return NextResponse.json({ error: message }, { status });
+      const questions = await generateClarifyingQuestions(parsedProposals);
+
+      await prisma.analysis.update({
+        where: { id: analysis.id },
+        data: {
+          status: 'clarifying',
+          parsedProposals: JSON.stringify(parsedProposals),
+          clarifyingQuestions: JSON.stringify(questions),
+          analysisProgress: JSON.stringify({ stage: 'complete', message: 'Ready for review' }),
+        },
+      });
+
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'clarifying' },
+      });
+    } catch (error: unknown) {
+      console.error('Sync analysis error:', error);
+      await prisma.analysis.update({
+        where: { id: analysis.id },
+        data: {
+          status: 'failed',
+          analysisProgress: JSON.stringify({
+            stage: 'error',
+            message: error instanceof Error ? error.message : 'Analysis failed',
+          }),
+        },
+      });
+      await prisma.project.update({
+        where: { id: projectId },
+        data: { status: 'draft' },
+      });
+    }
   }
+
+  return NextResponse.json(analysis, { status: 202 });
 }
