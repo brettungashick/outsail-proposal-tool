@@ -273,7 +273,7 @@ describe('recalculateTable', () => {
   });
 
   describe('headcount growth scaling', () => {
-    it('applies growth percentage to software and service fees in Y2/Y3', () => {
+    it('applies growth percentage to software and service fees in Y2/Y3 (additive)', () => {
       const table = makeTable({ headcountGrowthY2: 10, headcountGrowthY3: 20 });
       const result = recalculateTable(table, {}, {});
 
@@ -281,9 +281,10 @@ describe('recalculateTable', () => {
       // = 105600 + 5500 - 3000 = 108100
       expect(getAmount(result, 'year2', 0)).toBe(108100);
 
-      // Vendor A Y3: software (96000 * 1.20) + service (5000 * 1.20) + recurring disc (-3000)
-      // = 115200 + 6000 - 3000 = 118200
-      expect(getAmount(result, 'year3', 0)).toBe(118200);
+      // Vendor A Y3: additive from Y2, not base
+      // software (105600 * 1.20) + service (5500 * 1.20) + recurring disc (-3000)
+      // = 126720 + 6600 - 3000 = 130320
+      expect(getAmount(result, 'year3', 0)).toBe(130320);
     });
 
     it('does not apply growth to implementation fees', () => {
@@ -538,6 +539,113 @@ describe('recalculateTable', () => {
       const pepmVal = getRow(result, 'effective_pepm').values[0];
       expect(pepmVal.audit).toBeDefined();
       expect(pepmVal.audit!.formula).toContain('software_subtotal / 12 / 500');
+    });
+  });
+
+  describe('section subtotals', () => {
+    it('marks fee section subtotals with isSectionSubtotal', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const swSubtotal = getRow(result, 'sw_subtotal');
+      const implSubtotal = getRow(result, 'impl_subtotal');
+      const svcSubtotal = getRow(result, 'svc_subtotal');
+      expect(swSubtotal.isSectionSubtotal).toBe(true);
+      expect(implSubtotal.isSectionSubtotal).toBe(true);
+      expect(svcSubtotal.isSectionSubtotal).toBe(true);
+    });
+
+    it('section subtotals calculate correctly', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      // Software: 60000 + 36000 = 96000
+      expect(getAmount(result, 'sw_subtotal', 0)).toBe(96000);
+      // Implementation: 15000
+      expect(getAmount(result, 'impl_subtotal', 0)).toBe(15000);
+      // Services: 5000
+      expect(getAmount(result, 'svc_subtotal', 0)).toBe(5000);
+    });
+
+    it('TOTAL does not double-count section subtotals', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      // Y1 before discounts = 96000 + 15000 + 5000 = 116000 (not 116000 + 96000 + 15000 + 5000)
+      expect(getAmount(result, 'year1_before_discounts', 0)).toBe(116000);
+    });
+
+    it('section subtotals with growth factor', () => {
+      const table = makeTable({ headcountGrowthY2: 10 });
+      const result = recalculateTable(table, {}, {});
+      // Y2 uses section subtotals scaled by growth: (96000 + 5000) * 1.10 - 3000 = 108100
+      expect(getAmount(result, 'year2', 0)).toBe(108100);
+    });
+
+    it('section subtotals with discounts applied correctly', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      // Y1: 116000 + (-10000) + (-3000) = 103000
+      expect(getAmount(result, 'year1', 0)).toBe(103000);
+      // 3yr total includes discounts correctly
+      expect(getAmount(result, 'total3yr', 0)).toBe(299000);
+    });
+
+    it('inserts section subtotal if section has none', () => {
+      const table = makeTable();
+      // Remove subtotal rows from impl and service sections
+      const implSection = table.sections.find(s => s.name === 'Implementation Fees (One-Time)')!;
+      implSection.rows = implSection.rows.filter(r => !r.isSubtotal);
+      const svcSection = table.sections.find(s => s.name === 'Service Fees (Recurring)')!;
+      svcSection.rows = svcSection.rows.filter(r => !r.isSubtotal);
+
+      const result = recalculateTable(table, {}, {});
+
+      // Should have auto-inserted section subtotals
+      const implSubtotal = result.sections.find(s => s.name === 'Implementation Fees (One-Time)')!
+        .rows.find(r => r.isSectionSubtotal);
+      const svcSubtotal = result.sections.find(s => s.name === 'Service Fees (Recurring)')!
+        .rows.find(r => r.isSectionSubtotal);
+
+      expect(implSubtotal).toBeDefined();
+      expect(implSubtotal!.values[0].amount).toBe(15000);
+      expect(svcSubtotal).toBeDefined();
+      expect(svcSubtotal!.values[0].amount).toBe(5000);
+    });
+  });
+
+  describe('additive headcount growth (year-over-year)', () => {
+    it('Y3 builds on Y2 (5% then 0% → Y3 = Y2)', () => {
+      const table = makeTable({ headcountGrowthY2: 5, headcountGrowthY3: 0 });
+      const result = recalculateTable(table, {}, {});
+
+      // Y2: (96000 + 5000) * 1.05 - 3000 = 103050
+      const y2 = getAmount(result, 'year2', 0)!;
+      // Y3: same as Y2 since 0% growth from Y2
+      const y3 = getAmount(result, 'year3', 0)!;
+      expect(y2).toBe(y3);
+    });
+
+    it('Y1=100, Y2=10%, Y3=5% → compounds correctly', () => {
+      const table = makeTable({ headcountGrowthY2: 10, headcountGrowthY3: 5 });
+      const result = recalculateTable(table, {}, {});
+
+      // Y2 software: 96000 * 1.10 = 105600, service: 5000 * 1.10 = 5500
+      // Y3 software: 105600 * 1.05 = 110880, service: 5500 * 1.05 = 5775
+      // Y3 = 110880 + 5775 - 3000 = 113655
+      expect(getAmount(result, 'year3', 0)).toBe(113655);
+    });
+
+    it('negative growth compounds correctly', () => {
+      const table = makeTable({ headcountGrowthY2: -10, headcountGrowthY3: 5 });
+      const result = recalculateTable(table, {}, {});
+
+      // Y2 software: 96000 * 0.90 = 86400, service: 5000 * 0.90 = 4500
+      // Y3 software: 86400 * 1.05 = 90720, service: 4500 * 1.05 = 4725
+      // Y3 = 90720 + 4725 - 3000 = 92445
+      expect(getAmount(result, 'year3', 0)).toBe(92445);
+    });
+
+    it('PEPM uses correct headcount (not affected by growth directly)', () => {
+      // PEPM is based on normalizedHeadcount (base), not growth-adjusted
+      const table = makeTable({ headcountGrowthY2: 10 });
+      const result = recalculateTable(table, {}, {});
+      const pepmRow = getRow(result, 'effective_pepm');
+      // PEPM = 96000 / 12 / 500 = 16.00 (always uses base headcount)
+      expect(pepmRow.values[0].amount).toBe(16);
     });
   });
 

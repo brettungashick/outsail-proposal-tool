@@ -46,6 +46,7 @@ function sumDataRows(
 
   for (const row of section.rows) {
     if (row.isSubtotal) continue;
+    if (row.isSectionSubtotal) continue;
     if (row.isPepm) continue;
     if (hiddenRows[row.id]) continue;
     const val = row.values[vendorIndex];
@@ -147,6 +148,68 @@ function makeValue(
   };
 }
 
+/** Label map for section subtotal rows */
+const SECTION_SUBTOTAL_LABELS: Record<string, string> = {
+  [SOFTWARE_SECTION]: 'Software Subtotal',
+  [IMPLEMENTATION_SECTION]: 'Implementation Subtotal',
+  [SERVICE_SECTION]: 'Services Subtotal',
+};
+
+const SECTION_SUBTOTAL_IDS: Record<string, string> = {
+  [SOFTWARE_SECTION]: 'sw_section_subtotal',
+  [IMPLEMENTATION_SECTION]: 'impl_section_subtotal',
+  [SERVICE_SECTION]: 'svc_section_subtotal',
+};
+
+/**
+ * Ensure each fee section has a section subtotal row marked with isSectionSubtotal.
+ * Existing isSubtotal rows in fee sections are promoted to isSectionSubtotal.
+ * If no subtotal row exists, one is inserted at the end.
+ */
+function ensureSectionSubtotals(
+  section: TableSection,
+  vendorCount: number,
+  hiddenRows: HiddenRows
+): void {
+  const label = SECTION_SUBTOTAL_LABELS[section.name];
+  if (!label) return; // Not a fee section
+
+  // Check for existing subtotal row (isSubtotal or isSectionSubtotal)
+  let subtotalRow = section.rows.find(r => r.isSubtotal || r.isSectionSubtotal);
+
+  if (subtotalRow) {
+    // Promote to isSectionSubtotal
+    subtotalRow.isSectionSubtotal = true;
+    subtotalRow.isSubtotal = true;
+  } else {
+    // Insert a new section subtotal row
+    const id = SECTION_SUBTOTAL_IDS[section.name] || `${section.name}_subtotal`;
+    const values: VendorValue[] = Array.from({ length: vendorCount }, () => ({
+      amount: 0, display: '$0', note: null, citation: null, isConfirmed: true,
+    }));
+    subtotalRow = {
+      id,
+      label,
+      values,
+      isSubtotal: true,
+      isSectionSubtotal: true,
+    };
+    section.rows.push(subtotalRow);
+  }
+
+  // Compute subtotal values
+  const contributingIds = section.rows
+    .filter(r => !r.isSubtotal && !r.isSectionSubtotal && !r.isPepm && !hiddenRows[r.id])
+    .map(r => r.id);
+  const formula = `SUM(${contributingIds.join(', ')})`;
+
+  for (let vi = 0; vi < vendorCount; vi++) {
+    if (subtotalRow.values[vi]?.isManualOverride) continue;
+    const r = sumDataRows(section, vi, hiddenRows);
+    subtotalRow.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, subtotalRow.values[vi], formula);
+  }
+}
+
 /**
  * Recalculate all subtotals and totals in the comparison table.
  * Returns a new ComparisonTable (does not mutate the input).
@@ -162,30 +225,17 @@ export function recalculateTable(
   const findSection = (name: string) =>
     result.sections.find((s) => s.name === name);
 
-  // Step 1: Recompute subtotal rows within fee sections
+  // Step 1: Ensure section subtotals exist and are computed for all fee sections
   for (const section of result.sections) {
     if (section.name === TOTALS_SECTION || section.name === DISCOUNT_SECTION) continue;
-
-    for (const row of section.rows) {
-      if (!row.isSubtotal) continue;
-      // Build formula from contributing row IDs
-      const contributingIds = section.rows
-        .filter(r => !r.isSubtotal && !r.isPepm && !hiddenRows[r.id])
-        .map(r => r.id);
-      const formula = `SUM(${contributingIds.join(', ')})`;
-      for (let vi = 0; vi < vendorCount; vi++) {
-        if (row.values[vi]?.isManualOverride) continue;
-        const r = sumDataRows(section, vi, hiddenRows);
-        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
-      }
-    }
+    ensureSectionSubtotals(section, vendorCount, hiddenRows);
   }
 
   // Step 1b: Ensure an "Effective PEPM" row exists right after the software subtotal
   if (result.normalizedHeadcount > 0) {
     const swSection = findSection(SOFTWARE_SECTION);
     if (swSection) {
-      const subtotalIdx = swSection.rows.findIndex((r) => r.isSubtotal);
+      const subtotalIdx = swSection.rows.findIndex((r) => r.isSubtotal || r.isSectionSubtotal);
       const pepmIdx = swSection.rows.findIndex((r) => r.id === 'effective_pepm');
 
       // Build PEPM values from software subtotal
@@ -246,7 +296,7 @@ export function recalculateTable(
 
   function getSectionResult(section: TableSection | undefined, vi: number): SumResult {
     if (!section) return ZERO_SUM;
-    const subtotalRow = section.rows.find((r) => r.isSubtotal);
+    const subtotalRow = section.rows.find((r) => r.isSubtotal || r.isSectionSubtotal);
     if (subtotalRow) {
       const val = subtotalRow.values[vi];
       return {
@@ -261,8 +311,8 @@ export function recalculateTable(
   for (let vi = 0; vi < vendorCount; vi++) {
     const vendorName = result.vendors[vi];
     const softwareResult = getSectionResult(softwareSection, vi);
-    const implResult = sumDataRows(implSection, vi, hiddenRows);
-    const serviceResult = sumDataRows(serviceSection, vi, hiddenRows);
+    const implResult = getSectionResult(implSection, vi);
+    const serviceResult = getSectionResult(serviceSection, vi);
 
     // Use year-filtered discounts for proper Y2/Y3 calculation
     const allDiscounts = sumDiscountsByYear(discountSection, vi, vendorName, discountToggles, 'all');
@@ -272,6 +322,7 @@ export function recalculateTable(
     const y1Result = addResults(y1BeforeResult, allDiscounts);
 
     // Year 2/3: no implementation fees, recurring discounts only
+    // Growth is ADDITIVE: Y2 scales from base, Y3 scales from Y2
     const growthY2 = (result.headcountGrowthY2 || 0) / 100;
     const growthY3 = (result.headcountGrowthY3 || 0) / 100;
 
@@ -281,22 +332,27 @@ export function recalculateTable(
       tbcCount: r.tbcCount,
     });
 
+    // Y2 = base * (1 + growthY2)
     const y2SoftwareResult = scaleResult(softwareResult, growthY2);
     const y2ServiceResult = scaleResult(serviceResult, growthY2);
     const y2Result = addResults(y2SoftwareResult, y2ServiceResult, recurringDiscounts);
 
-    const y3SoftwareResult = scaleResult(softwareResult, growthY3);
-    const y3ServiceResult = scaleResult(serviceResult, growthY3);
+    // Y3 = Y2 * (1 + growthY3) — additive, not independent from base
+    const y3SoftwareResult = scaleResult(y2SoftwareResult, growthY3);
+    const y3ServiceResult = scaleResult(y2ServiceResult, growthY3);
     const y3Result = addResults(y3SoftwareResult, y3ServiceResult, recurringDiscounts);
 
     const total3yrResult = addResults(y1Result, y2Result, y3Result);
 
+    const y2Factor = (1 + growthY2).toFixed(2);
+    const y3CompoundFactor = ((1 + growthY2) * (1 + growthY3)).toFixed(2);
+
     const totalsMap: Record<string, { result: SumResult; formula: string }> = {
-      year1_before_discounts: { result: y1BeforeResult, formula: 'software_subtotal + impl_total + service_total' },
+      year1_before_discounts: { result: y1BeforeResult, formula: 'software_subtotal + impl_subtotal + service_subtotal' },
       year1_discounts: { result: allDiscounts, formula: 'SUM(enabled_discounts)' },
       year1: { result: y1Result, formula: 'year1_before_discounts + year1_discounts' },
-      year2: { result: y2Result, formula: `(software + service)×${(1 + growthY2).toFixed(2)} + recurring_discounts` },
-      year3: { result: y3Result, formula: `(software + service)×${(1 + growthY3).toFixed(2)} + recurring_discounts` },
+      year2: { result: y2Result, formula: `(software + service)×${y2Factor} + recurring_discounts` },
+      year3: { result: y3Result, formula: `(software + service)×${y3CompoundFactor} + recurring_discounts` },
       total3yr: { result: total3yrResult, formula: 'year1 + year2 + year3' },
     };
 

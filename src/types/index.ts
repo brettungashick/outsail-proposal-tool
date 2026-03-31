@@ -16,6 +16,7 @@ export interface TableRow {
   label: string;
   values: VendorValue[];
   isSubtotal?: boolean;
+  isSectionSubtotal?: boolean;
   isDiscount?: boolean;
   isPepm?: boolean;
 }

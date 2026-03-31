@@ -313,11 +313,11 @@ function SectionBlock({
       </tr>
       {section.rows.map((row, rowIdx) => {
         const isDiscountRow = row.isDiscount;
-        const isComputed = row.isSubtotal || row.isPepm || isTotalsSection;
-        const canEditCell = isEditable;
-        const canDelete = isEditable && !row.isSubtotal && !isTotalsSection;
+        const isComputed = row.isSubtotal || row.isSectionSubtotal || row.isPepm || isTotalsSection;
+        const canEditCell = isEditable && !row.isSectionSubtotal;
+        const canDelete = isEditable && !row.isSubtotal && !row.isSectionSubtotal && !isTotalsSection;
         const isRowHidden = hiddenRows?.[row.id] === true;
-        const canDrag = isEditable && !row.isSubtotal && !isTotalsSection && !!onRowReorder;
+        const canDrag = isEditable && !row.isSubtotal && !row.isSectionSubtotal && !isTotalsSection && !!onRowReorder;
 
         return (
           <tr
@@ -356,13 +356,15 @@ function SectionBlock({
             } ${
               isRowHidden
                 ? 'opacity-40 bg-slate-50/50'
-                : row.isSubtotal
-                  ? 'bg-slate-50 font-semibold'
-                  : row.isPepm
-                    ? 'bg-blue-50/50 text-blue-600 text-xs italic'
-                    : isDiscountRow
-                      ? 'bg-amber-50/30'
-                      : 'hover:bg-slate-50/50'
+                : row.isSectionSubtotal
+                  ? 'bg-slate-100 font-semibold'
+                  : row.isSubtotal
+                    ? 'bg-slate-50 font-semibold'
+                    : row.isPepm
+                      ? 'bg-blue-50/50 text-blue-600 text-xs italic'
+                      : isDiscountRow
+                        ? 'bg-amber-50/30'
+                        : 'hover:bg-slate-50/50'
             }`}
           >
             <td className="px-4 py-2 border border-slate-200 text-sm text-slate-700">
@@ -387,7 +389,7 @@ function SectionBlock({
                     </svg>
                   </button>
                 )}
-                {isEditable && !row.isSubtotal && !isTotalsSection && onToggleHidden && (
+                {isEditable && !row.isSubtotal && !row.isSectionSubtotal && !isTotalsSection && onToggleHidden && (
                   <button
                     onClick={() => onToggleHidden(row.id)}
                     className={`opacity-0 group-hover:opacity-100 flex-shrink-0 transition ${
