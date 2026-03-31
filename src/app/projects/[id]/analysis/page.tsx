@@ -40,6 +40,7 @@ export default function AnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AnalysisTab>('summary');
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -114,38 +115,79 @@ export default function AnalysisPage() {
 
   const canEdit = isOwner || isAdmin;
 
-  // Debounced save for comparison data — uses ref to avoid stale closure
-  const debouncedSaveComparison = useCallback((newJson: string) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      const current = analysisRef.current;
-      if (!current) return;
-      setSaving(true);
-      fetch(`/api/analysis/${current.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'comparisonData',
-          fieldPath: 'comparisonData',
-          oldValue: current.comparisonData,
-          newValue: newJson,
-        }),
-      }).finally(() => setSaving(false));
-    }, 500);
-  }, []);
-
-  const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
-    if (!analysis) return;
+  // Helper to save a field with error handling
+  const saveToApi = useCallback(async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
+    const current = analysisRef.current;
+    if (!current) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      await fetch(`/api/analysis/${analysis.id}`, {
+      const res = await fetch(`/api/analysis/${current.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fieldType, fieldPath, oldValue, newValue }),
       });
+      if (!res.ok) {
+        const msg = `Save failed (${res.status})`;
+        console.error(msg, fieldType);
+        setSaveError(msg);
+      }
+    } catch (err) {
+      console.error('Save error:', err);
+      setSaveError('Network error — changes may not be saved');
     } finally {
       setSaving(false);
     }
+  }, []);
+
+  // Pending save ref for flush-on-unload
+  const pendingSaveRef = useRef<{ fieldType: string; newValue: string } | null>(null);
+
+  // Debounced save for comparison data — uses ref to avoid stale closure
+  const debouncedSaveComparison = useCallback((newJson: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    pendingSaveRef.current = { fieldType: 'comparisonData', newValue: newJson };
+    saveTimer.current = setTimeout(() => {
+      const current = analysisRef.current;
+      if (!current) return;
+      pendingSaveRef.current = null;
+      saveToApi('comparisonData', 'comparisonData', current.comparisonData, newJson);
+    }, 500);
+  }, [saveToApi]);
+
+  // Flush pending saves on page unload
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const pending = pendingSaveRef.current;
+      const current = analysisRef.current;
+      if (pending && current) {
+        // Use sendBeacon for reliable unload saves
+        navigator.sendBeacon(
+          `/api/analysis/${current.id}`,
+          new Blob([JSON.stringify({
+            fieldType: pending.fieldType,
+            fieldPath: pending.fieldType,
+            oldValue: current.comparisonData,
+            newValue: pending.newValue,
+          })], { type: 'application/json' })
+        );
+        pendingSaveRef.current = null;
+      }
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      flush();
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
+
+  const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
+    if (!analysis) return;
+    await saveToApi(fieldType, fieldPath, oldValue, newValue);
   };
 
   const handleCellEdit = (
@@ -262,21 +304,10 @@ export default function AnalysisPage() {
     if (comparisonData && analysis) {
       const recalculated = recalculateTable(comparisonData, updated, hiddenRows);
       const newJson = JSON.stringify(recalculated);
-      setAnalysis({ ...analysis, comparisonData: newJson, discountToggles: JSON.stringify(updated) });
+      const togglesJson = JSON.stringify(updated);
+      setAnalysis({ ...analysis, comparisonData: newJson, discountToggles: togglesJson });
       debouncedSaveComparison(newJson);
-
-      // Also save discount toggles
-      setSaving(true);
-      fetch(`/api/analysis/${analysis.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'discountToggles',
-          fieldPath: 'discountToggles',
-          oldValue: analysis.discountToggles || '{}',
-          newValue: JSON.stringify(updated),
-        }),
-      }).finally(() => setSaving(false));
+      saveToApi('discountToggles', 'discountToggles', analysis.discountToggles || '{}', togglesJson);
     }
   };
 
@@ -292,20 +323,10 @@ export default function AnalysisPage() {
     if (comparisonData && analysis) {
       const recalculated = recalculateTable(comparisonData, discountToggles, updated);
       const newJson = JSON.stringify(recalculated);
-      setAnalysis({ ...analysis, comparisonData: newJson, hiddenRows: JSON.stringify(updated) });
+      const hiddenJson = JSON.stringify(updated);
+      setAnalysis({ ...analysis, comparisonData: newJson, hiddenRows: hiddenJson });
       debouncedSaveComparison(newJson);
-
-      // Save hidden rows
-      fetch(`/api/analysis/${analysis.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'hiddenRows',
-          fieldPath: 'hiddenRows',
-          oldValue: analysis.hiddenRows || '{}',
-          newValue: JSON.stringify(updated),
-        }),
-      });
+      saveToApi('hiddenRows', 'hiddenRows', analysis.hiddenRows || '{}', hiddenJson);
     }
   };
 
@@ -325,6 +346,7 @@ export default function AnalysisPage() {
         note: null,
         citation: null,
         isConfirmed: false,
+        status: 'tbc' as const,
       })),
       isDiscount: isDiscountSection,
       isSubtotal: false,
@@ -453,6 +475,15 @@ export default function AnalysisPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {saveError && (
+                <button
+                  onClick={() => setSaveError(null)}
+                  className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200 hover:bg-red-100"
+                  title="Click to dismiss"
+                >
+                  {saveError}
+                </button>
+              )}
               {saving && (
                 <span className="text-xs text-blue-500">Saving...</span>
               )}

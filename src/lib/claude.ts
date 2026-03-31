@@ -113,6 +113,77 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
   return parsed;
 }
 
+/**
+ * Post-AI validation: fix range midpoints, flag PEPM sanity issues,
+ * and ensure discount amounts are negative.
+ */
+function validateAndFixComparison(
+  result: AnalysisResult,
+  parsedProposals: ParsedProposal[],
+  targetHeadcount: number | null
+): void {
+  const table = result.comparisonTable;
+
+  // Build a lookup of parsed PEPM rates per vendor for sanity checking
+  const vendorPepmRates: Record<string, { name: string; annual: number }[]> = {};
+  for (const proposal of parsedProposals) {
+    const rates: { name: string; annual: number }[] = [];
+    const hc = targetHeadcount || proposal.headcount || 100;
+    for (const mod of proposal.modules) {
+      if (mod.feeType === 'PEPM' && mod.feeAmount !== null) {
+        rates.push({ name: mod.name, annual: mod.feeAmount * hc * 12 });
+      } else if (mod.isRange && mod.rangeMin !== null && mod.rangeMax !== null) {
+        const midpoint = (mod.rangeMin + mod.rangeMax) / 2;
+        if (mod.feeType === 'PEPM') {
+          rates.push({ name: mod.name, annual: midpoint * hc * 12 });
+        }
+      }
+    }
+    vendorPepmRates[proposal.vendorName] = rates;
+  }
+
+  for (const section of table.sections) {
+    for (const row of section.rows) {
+      for (let vi = 0; vi < table.vendors.length; vi++) {
+        const val = row.values[vi];
+        if (!val) continue;
+
+        // Fix: Ensure discount amounts are negative
+        if (row.isDiscount && val.amount !== null && val.amount > 0) {
+          val.amount = -val.amount;
+          val.display = `-$${Math.abs(val.amount).toLocaleString('en-US')}`;
+          if (!val.note) val.note = 'Sign corrected to negative';
+        }
+      }
+    }
+  }
+
+  // Log PEPM sanity warnings (server-side only, helps debugging "weird numbers")
+  for (let vi = 0; vi < table.vendors.length; vi++) {
+    const vendorName = table.vendors[vi];
+    const expectedRates = vendorPepmRates[vendorName] || [];
+    if (expectedRates.length === 0) continue;
+
+    const softwareSection = table.sections.find(s => s.name === 'Software Fees (Recurring)');
+    if (!softwareSection) continue;
+
+    const subtotalRow = softwareSection.rows.find(r => r.isSubtotal);
+    if (!subtotalRow || subtotalRow.values[vi]?.amount === null) continue;
+
+    const aiSubtotal = subtotalRow.values[vi].amount!;
+    const expectedTotal = expectedRates.reduce((s, r) => s + r.annual, 0);
+
+    // If the AI subtotal is dramatically different from our expected PEPM-based total, log a warning
+    if (expectedTotal > 0 && (aiSubtotal < expectedTotal * 0.08 || aiSubtotal > expectedTotal * 13)) {
+      console.warn(
+        `[PEPM sanity check] ${vendorName}: AI subtotal $${aiSubtotal} vs expected ~$${Math.round(expectedTotal)} ` +
+        `(${expectedRates.length} PEPM items × ${targetHeadcount || '?'} employees × 12 months). ` +
+        `Possible annualization error.`
+      );
+    }
+  }
+}
+
 export async function generateComparison(
   parsedProposals: ParsedProposal[],
   advisorContext?: string
@@ -123,16 +194,22 @@ export async function generateComparison(
     .filter((h): h is number => h !== null);
   const targetHeadcount =
     headcounts.length > 0
-      ? headcounts.sort((a, b) => a - b)[Math.floor(headcounts.length / 2)]
+      ? (() => {
+          headcounts.sort((a, b) => a - b);
+          const mid = Math.floor(headcounts.length / 2);
+          return headcounts.length % 2 === 0
+            ? Math.round((headcounts[mid - 1] + headcounts[mid]) / 2)
+            : headcounts[mid];
+        })()
       : null;
 
   const prompt = `You are building a standardized comparison of HRIS/HR Tech vendor proposals for a client evaluation. You have ${parsedProposals.length} parsed proposals from these vendors: ${vendorNames.join(', ')}.
 
 CRITICAL RULES:
 - NEVER hallucinate or fill in gaps that are not found in the parsed data below. If something is missing, set amount to null, display to "To be confirmed", and isConfirmed to false.
-- When a price range was given (isRange: true), use the MIDPOINT of rangeMin and rangeMax. Note this in standardizationNotes.
+- When a price range was given (isRange: true), you MUST calculate the midpoint: (rangeMin + rangeMax) / 2, then use that as the base rate for annualization. Example: "$5-$8 PEPM" → midpoint $6.50 PEPM → $6.50 × headcount × 12 = annual amount. Note the range and midpoint in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
-- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. Implementation fees are one-time and should NOT be annualized. Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes.
+- ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. VERIFY YOUR MATH: for example, $10 PEPM × 500 employees × 12 months = $60,000/year (NOT $5,000, NOT $6,000). If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. Implementation fees are one-time and should NOT be annualized. Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes, showing the calculation (e.g., "$10 PEPM × 500 × 12 = $60,000").
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
 - Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
 
@@ -241,6 +318,7 @@ CONSENSUS MODULE CATEGORIES (map vendor modules to these):
 - Compensation Management (include only if at least one vendor has it)
 
 For Software Fees, add a "Software Subtotal" row at the end (isSubtotal: true).
+If any module was originally quoted as PEPM, add an informational row AFTER it showing the per-employee rate: set "isPepm": true, label like "↳ $X.XX PEPM", amount to null, display to the PEPM rate string. These PEPM rows are for reference only and excluded from subtotals.
 
 For Implementation Fees, break out into as much detail as possible. Common implementation line items include:
 - Total Implementation / Base Implementation Fee
@@ -306,6 +384,7 @@ If any component of a total is "To be confirmed", mark the total as "To be confi
 
   try {
     const result: AnalysisResult = JSON.parse(cleanText);
+    validateAndFixComparison(result, parsedProposals, targetHeadcount);
     return result;
   } catch (parseError) {
     console.error('Failed to parse Claude comparison response. Response length:', responseText.length, 'Stop reason:', message.stop_reason);
