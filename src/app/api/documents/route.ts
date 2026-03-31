@@ -38,11 +38,20 @@ export async function POST(req: NextRequest) {
   const buffer = Buffer.from(bytes);
 
   let rawText = '';
+  let extractionWarning: string | null = null;
   try {
     rawText = await extractTextFromBuffer(buffer, fileType);
+    // Validate extraction produced meaningful content
+    if (!rawText || rawText.trim().length < 50) {
+      extractionWarning =
+        'Text extraction produced little or no content. The file may be image-based (scanned), password-protected, or corrupted. The AI analysis may produce incomplete results for this vendor.';
+      rawText = '';
+    }
   } catch (error) {
     console.error('Text extraction error:', error);
-    rawText = 'Error extracting text from file';
+    extractionWarning =
+      'Failed to extract text from this file. The AI analysis may produce incomplete results for this vendor. Consider re-uploading in a different format.';
+    rawText = '';
   }
 
   // Compute quoteVersion for updated quotes
@@ -92,5 +101,5 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return NextResponse.json(document, { status: 201 });
+  return NextResponse.json({ ...document, extractionWarning }, { status: 201 });
 }
