@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { sendInviteEmail } from '@/lib/email';
+import { getAppBaseUrl } from '@/lib/access';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Build invite URL
-  const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const baseUrl = getAppBaseUrl(req.headers);
   const inviteUrl = `${baseUrl}/invite/${inviteToken}`;
 
   // Send invite email (non-blocking — still return the link as fallback)

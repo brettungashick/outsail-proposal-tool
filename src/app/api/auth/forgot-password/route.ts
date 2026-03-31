@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const baseUrl = getAppBaseUrl();
+    const baseUrl = getAppBaseUrl(req.headers);
     const resetUrl = `${baseUrl}/reset-password/${token}`;
 
     if (process.env.RESEND_API_KEY) {

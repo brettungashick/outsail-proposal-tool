@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
+import { getAppBaseUrl } from '@/lib/access';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const baseUrl = process.env.NEXTAUTH_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
+  const baseUrl = getAppBaseUrl(req.headers);
   const shareUrl = `${baseUrl}/share/${token}`;
 
   return NextResponse.json({ ...shareLink, shareUrl }, { status: 201 });
