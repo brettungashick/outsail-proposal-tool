@@ -6,8 +6,22 @@ import { prisma } from '@/lib/prisma';
 import { getAppBaseUrl, emailDomain } from '@/lib/access';
 import { sendShareEmail } from '@/lib/email';
 
+// One-time migration: ensure ShareLink columns exist in Turso
+let _migrated = false;
+async function ensureShareLinkColumns() {
+  if (_migrated) return;
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ShareLink" ADD COLUMN "allowedDomain" TEXT NOT NULL DEFAULT ''`);
+  } catch { /* column already exists */ }
+  try {
+    await prisma.$executeRawUnsafe(`ALTER TABLE "ShareLink" ADD COLUMN "accessMode" TEXT NOT NULL DEFAULT 'domain'`);
+  } catch { /* column already exists */ }
+  _migrated = true;
+}
+
 export async function POST(req: NextRequest) {
   try {
+    await ensureShareLinkColumns();
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
