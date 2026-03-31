@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { getAppBaseUrl } from '@/lib/access';
+import { sendShareEmail } from '@/lib/email';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -19,10 +20,16 @@ export async function POST(req: NextRequest) {
   // Verify project belongs to user or user is admin
   const project = await prisma.project.findFirst({
     where: projectWhereOwnerOrAdmin(projectId, userId, userRole),
+    select: { id: true, name: true, advisorId: true },
   });
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
+
+  const advisor = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
 
   const token = randomUUID();
   const expiresAt = new Date();
@@ -39,6 +46,16 @@ export async function POST(req: NextRequest) {
 
   const baseUrl = getAppBaseUrl(req.headers);
   const shareUrl = `${baseUrl}/share/${token}`;
+
+  // Send email to recipient (fire-and-forget — don't block response on email delivery)
+  sendShareEmail(
+    email.toLowerCase().trim(),
+    shareUrl,
+    project?.name || 'Proposal Comparison',
+    advisor?.name || 'Your advisor',
+  ).catch((err) => {
+    console.error('Failed to send share email:', err);
+  });
 
   return NextResponse.json({ ...shareLink, shareUrl }, { status: 201 });
 }

@@ -31,6 +31,8 @@ export default function SharePage() {
   const [data, setData] = useState<ShareData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [vendorColors, setVendorColors] = useState<Record<string, string>>({});
+  const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
 
   const fetchShareData = useCallback(async () => {
     try {
@@ -50,6 +52,20 @@ export default function SharePage() {
 
   useEffect(() => {
     fetchShareData();
+    // Fetch vendor metadata for logos/colors
+    fetch('/api/vendors')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((vendors: { name: string; logoUrl: string | null; accentColor: string | null }[]) => {
+        const colors: Record<string, string> = {};
+        const logos: Record<string, string> = {};
+        for (const v of vendors) {
+          if (v.accentColor) colors[v.name] = v.accentColor;
+          if (v.logoUrl) logos[v.name] = v.logoUrl;
+        }
+        setVendorColors(colors);
+        setVendorLogos(logos);
+      })
+      .catch(() => {});
   }, [fetchShareData]);
 
   if (loading) {
@@ -111,7 +127,7 @@ export default function SharePage() {
         {/* Comparison Table - Read Only */}
         <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
           <h2 className="font-semibold text-slate-900 mb-4">Side-by-Side Comparison</h2>
-          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => {}} />
+          <ComparisonTable data={comparisonData} isEditable={false} onCellEdit={() => {}} vendorColors={vendorColors} vendorLogos={vendorLogos} />
         </div>
 
         {/* Notes - Read Only */}

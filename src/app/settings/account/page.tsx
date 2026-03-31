@@ -25,15 +25,26 @@ export default function AccountSettingsPage() {
   const [logoSuccess, setLogoSuccess] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Favicon upload state (admin only)
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+  const [faviconUploading, setFaviconUploading] = useState(false);
+  const [faviconError, setFaviconError] = useState('');
+  const [faviconSuccess, setFaviconSuccess] = useState('');
+  const faviconInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (status === 'unauthenticated') router.push('/login');
   }, [status, router]);
 
-  // Fetch current logo
+  // Fetch current logo and favicon
   useEffect(() => {
     fetch('/api/settings/logo')
       .then((res) => res.json())
       .then((data) => setLogoUrl(data.logoUrl))
+      .catch(() => {});
+    fetch('/api/settings/favicon')
+      .then((res) => res.json())
+      .then((data) => setFaviconUrl(data.faviconUrl))
       .catch(() => {});
   }, []);
 
@@ -73,6 +84,39 @@ export default function AccountSettingsPage() {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFaviconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFaviconError('');
+    setFaviconSuccess('');
+    setFaviconUploading(true);
+
+    const formData = new FormData();
+    formData.append('favicon', file);
+
+    try {
+      const res = await fetch('/api/settings/favicon', {
+        method: 'POST',
+        body: formData,
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error('Upload failed');
+      }
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      setFaviconUrl(data.faviconUrl);
+      setFaviconSuccess('Favicon updated! Refresh the page to see it in the browser tab.');
+    } catch (err) {
+      setFaviconError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setFaviconUploading(false);
+      if (faviconInputRef.current) faviconInputRef.current.value = '';
     }
   };
 
@@ -188,6 +232,58 @@ export default function AccountSettingsPage() {
                   {logoUploading ? 'Uploading...' : 'Upload Logo'}
                 </button>
                 <p className="text-xs text-slate-400 mt-1">PNG, JPEG, SVG, or WebP. Max 2MB.</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Favicon (Admin only) */}
+        {userRole === 'admin' && (
+          <div className="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Favicon</h2>
+            <p className="text-sm text-slate-500 mb-4">
+              Upload a favicon (browser tab icon). Recommended size: 32x32 or 64x64 pixels.
+            </p>
+
+            {faviconError && (
+              <div className="bg-red-50 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
+                {faviconError}
+                <button onClick={() => setFaviconError('')} className="ml-2 text-red-500 hover:text-red-700">x</button>
+              </div>
+            )}
+            {faviconSuccess && (
+              <div className="bg-green-50 text-green-700 px-4 py-3 rounded-lg text-sm mb-4">
+                {faviconSuccess}
+                <button onClick={() => setFaviconSuccess('')} className="ml-2 text-green-500 hover:text-green-700">x</button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-6">
+              <div className="w-16 h-16 border border-slate-200 rounded-lg flex items-center justify-center bg-slate-50 overflow-hidden">
+                {faviconUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={faviconUrl} alt="Current favicon" className="w-8 h-8 object-contain" />
+                ) : (
+                  <span className="text-xs text-slate-400">None</span>
+                )}
+              </div>
+
+              <div>
+                <input
+                  ref={faviconInputRef}
+                  type="file"
+                  accept="image/png,image/x-icon,image/svg+xml,image/webp,image/vnd.microsoft.icon"
+                  onChange={handleFaviconUpload}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => faviconInputRef.current?.click()}
+                  disabled={faviconUploading}
+                  className="bg-outsail-blue-dark text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-outsail-navy transition disabled:opacity-50"
+                >
+                  {faviconUploading ? 'Uploading...' : 'Upload Favicon'}
+                </button>
+                <p className="text-xs text-slate-400 mt-1">PNG, ICO, SVG, or WebP. Max 512KB.</p>
               </div>
             </div>
           </div>

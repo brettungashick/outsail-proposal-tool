@@ -50,6 +50,9 @@ export default function AnalysisPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const analysisRef = useRef<AnalysisData | null>(null);
 
+  const [vendorColors, setVendorColors] = useState<Record<string, string>>({});
+  const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
+
   // Keep ref in sync so debounced save always uses latest analysis
   useEffect(() => {
     analysisRef.current = analysis;
@@ -58,6 +61,23 @@ export default function AnalysisPage() {
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
   }, [authStatus, router]);
+
+  // Fetch vendor metadata (logos and colors)
+  useEffect(() => {
+    fetch('/api/vendors')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((vendors: { name: string; logoUrl: string | null; accentColor: string | null }[]) => {
+        const colors: Record<string, string> = {};
+        const logos: Record<string, string> = {};
+        for (const v of vendors) {
+          if (v.accentColor) colors[v.name] = v.accentColor;
+          if (v.logoUrl) logos[v.name] = v.logoUrl;
+        }
+        setVendorColors(colors);
+        setVendorLogos(logos);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchAnalysis = useCallback(async (analysisId?: string) => {
     const projRes = await fetch(`/api/projects/${projectId}`);
@@ -571,6 +591,8 @@ export default function AnalysisPage() {
                 onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
                 hiddenRows={hiddenRows}
                 onToggleHidden={canEdit ? handleToggleHidden : undefined}
+                vendorColors={vendorColors}
+                vendorLogos={vendorLogos}
                 onAddRow={canEdit ? handleAddRow : undefined}
                 onDeleteRow={canEdit ? handleDeleteRow : undefined}
                 onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
