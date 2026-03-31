@@ -47,6 +47,12 @@ export default function AnalysisPage() {
   const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const analysisRef = useRef<AnalysisData | null>(null);
+
+  // Keep ref in sync so debounced save always uses latest analysis
+  useEffect(() => {
+    analysisRef.current = analysis;
+  }, [analysis]);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -108,24 +114,25 @@ export default function AnalysisPage() {
 
   const canEdit = isOwner || isAdmin;
 
-  // Debounced save for comparison data
+  // Debounced save for comparison data — uses ref to avoid stale closure
   const debouncedSaveComparison = useCallback((newJson: string) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      if (!analysis) return;
+      const current = analysisRef.current;
+      if (!current) return;
       setSaving(true);
-      fetch(`/api/analysis/${analysis.id}`, {
+      fetch(`/api/analysis/${current.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fieldType: 'comparisonData',
           fieldPath: 'comparisonData',
-          oldValue: analysis.comparisonData,
+          oldValue: current.comparisonData,
           newValue: newJson,
         }),
       }).finally(() => setSaving(false));
     }, 500);
-  }, [analysis]);
+  }, []);
 
   const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
     if (!analysis) return;
@@ -158,8 +165,8 @@ export default function AnalysisPage() {
     if (newAmount !== null) {
       val.amount = newAmount;
     } else {
-      // Try to parse from display
-      const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
+      // Try to parse from display (strip currency symbols and /yr suffix)
+      const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim());
       if (!isNaN(numVal)) {
         val.amount = numVal;
       }
@@ -217,10 +224,19 @@ export default function AnalysisPage() {
       hidden: 'Hidden',
     };
 
-    val.display = displayMap[newStatus];
     val.status = newStatus;
     val.isConfirmed = newStatus !== 'tbc';
-    if (newStatus !== 'currency') {
+    if (newStatus === 'currency') {
+      // Switching back to currency: if amount was nullified, mark as TBC
+      if (val.amount === null) {
+        val.display = 'To be confirmed';
+        val.status = 'tbc';
+        val.isConfirmed = false;
+      } else {
+        val.display = displayMap[newStatus];
+      }
+    } else {
+      val.display = displayMap[newStatus];
       val.amount = null;
     }
 

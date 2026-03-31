@@ -105,7 +105,8 @@ function sumDiscountsByYear(
     if (yearFilter === 'recurring' && isYear1Only) continue;
 
     if (val.amount !== null) {
-      sum += val.amount;
+      // Ensure discounts are always negative (guard against AI returning positive values)
+      sum += val.amount > 0 ? -val.amount : val.amount;
     } else {
       tbcCount++;
     }
@@ -130,6 +131,7 @@ function makeValue(amount: number, hasTbc: boolean, tbcCount: number, existing: 
     ...existing,
     amount,
     display: formatCurrency(amount),
+    status: 'currency' as const,
     isConfirmed: !hasTbc,
     note: hasTbc ? `${tbcCount} item(s) still unconfirmed` : 'Auto-calculated',
   };
