@@ -1,19 +1,18 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const userId = user.id;
+  const userRole = user.role;
   const { id } = await params;
 
   // Verify document access: document must belong to a project owned by the user (or user is admin)

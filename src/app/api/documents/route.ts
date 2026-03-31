@@ -1,6 +1,6 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { extractTextFromBuffer, getFileType } from '@/lib/file-parser';
 
@@ -35,13 +35,13 @@ const ALLOWED_EXTENSIONS = Object.keys(ALLOWED_FILE_TYPES);
 export async function POST(req: NextRequest) {
   await ensureDocumentColumns();
 
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const userId = user.id;
+  const userRole = user.role;
 
   const formData = await req.formData();
   const file = formData.get('file') as File | null;

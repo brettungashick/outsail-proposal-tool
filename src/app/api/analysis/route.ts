@@ -1,17 +1,17 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { parseProposal, generateClarifyingQuestions, isApiKeyConfigured } from '@/lib/claude';
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const userId = user.id;
+  const userRole = user.role;
   const body = await req.json();
   const { projectId } = body;
 

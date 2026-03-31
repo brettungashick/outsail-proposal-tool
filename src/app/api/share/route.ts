@@ -1,9 +1,8 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import { authOptions, projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { projectWhereOwnerOrAdmin } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { getAppBaseUrl, emailDomain } from '@/lib/access';
+import { getAppBaseUrl, emailDomain, getSessionUser } from '@/lib/access';
 import { sendShareEmail } from '@/lib/email';
 
 // One-time migration: ensure ShareLink columns exist in Turso
@@ -22,13 +21,13 @@ async function ensureShareLinkColumns() {
 export async function POST(req: NextRequest) {
   try {
     await ensureShareLinkColumns();
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const user = await getSessionUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = (session.user as { id: string }).id;
-    const userRole = (session.user as { role?: string }).role;
+    const userId = user.id;
+    const userRole = user.role;
     const body = await req.json();
     const { projectId, email } = body;
 

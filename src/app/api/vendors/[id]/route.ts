@@ -1,15 +1,14 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
+  const userRole = user.role;
   if (userRole !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
@@ -30,12 +29,12 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
+  const userRole = user.role;
   if (userRole !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }

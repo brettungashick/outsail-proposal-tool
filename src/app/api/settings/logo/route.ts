@@ -1,6 +1,5 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 
 export async function GET() {
@@ -14,11 +13,11 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user) {
+    const user = await getSessionUser();
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    const role = (session.user as { role?: string }).role;
+    const role = user.role;
     if (role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }

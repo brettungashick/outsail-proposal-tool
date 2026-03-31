@@ -1,15 +1,13 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { sendInviteEmail } from '@/lib/email';
-import { getAppBaseUrl } from '@/lib/access';
+import { getAppBaseUrl, getSessionUser } from '@/lib/access';
 import { randomBytes } from 'crypto';
 import bcrypt from 'bcryptjs';
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -30,12 +28,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
+  const userRole = user.role;
   if (userRole !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
@@ -59,7 +57,7 @@ export async function POST(req: NextRequest) {
   // Create user with temporary password hash (they'll set their real password via invite link)
   const tempHash = await bcrypt.hash(randomBytes(16).toString('hex'), 12);
 
-  const user = await prisma.user.create({
+  const newUser = await prisma.user.create({
     data: {
       email: email.toLowerCase().trim(),
       name: name.trim(),
@@ -78,7 +76,7 @@ export async function POST(req: NextRequest) {
   let emailSent = false;
   if (process.env.RESEND_API_KEY) {
     try {
-      await sendInviteEmail(user.email, user.name, inviteUrl);
+      await sendInviteEmail(newUser.email, newUser.name, inviteUrl);
       emailSent = true;
     } catch (err) {
       console.error('Failed to send invite email:', err);
@@ -86,9 +84,9 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    id: user.id,
-    email: user.email,
-    name: user.name,
+    id: newUser.id,
+    email: newUser.email,
+    name: newUser.name,
     inviteUrl,
     inviteStatus: 'pending',
     emailSent,
