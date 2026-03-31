@@ -21,6 +21,7 @@ export interface TableRow {
 }
 
 export interface TableSection {
+  id?: string; // Stable section ID (optional for backward compat)
   name: string;
   rows: TableRow[];
 }
@@ -29,6 +30,7 @@ export interface ComparisonTable {
   vendors: string[];
   normalizedHeadcount: number;
   sections: TableSection[];
+  auditLog?: CellAuditEvent[];
   headcountGrowthY2?: number; // percentage, e.g. 5 for 5%
   headcountGrowthY3?: number;
 }

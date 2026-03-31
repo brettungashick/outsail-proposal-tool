@@ -126,7 +126,13 @@ function addResults(...results: SumResult[]): SumResult {
   return { sum, hasTbc: tbcCount > 0, tbcCount };
 }
 
-function makeValue(amount: number, hasTbc: boolean, tbcCount: number, existing: VendorValue): VendorValue {
+function makeValue(
+  amount: number,
+  hasTbc: boolean,
+  tbcCount: number,
+  existing: VendorValue,
+  formula?: string
+): VendorValue {
   return {
     ...existing,
     amount,
@@ -134,6 +140,10 @@ function makeValue(amount: number, hasTbc: boolean, tbcCount: number, existing: 
     status: 'currency' as const,
     isConfirmed: !hasTbc,
     note: hasTbc ? `${tbcCount} item(s) still unconfirmed` : 'Auto-calculated',
+    audit: {
+      ...(existing.audit || { sources: [], override: null, formula: null }),
+      formula: formula ?? existing.audit?.formula ?? null,
+    },
   };
 }
 
@@ -158,10 +168,69 @@ export function recalculateTable(
 
     for (const row of section.rows) {
       if (!row.isSubtotal) continue;
+      // Build formula from contributing row IDs
+      const contributingIds = section.rows
+        .filter(r => !r.isSubtotal && !r.isPepm && !hiddenRows[r.id])
+        .map(r => r.id);
+      const formula = `SUM(${contributingIds.join(', ')})`;
       for (let vi = 0; vi < vendorCount; vi++) {
         if (row.values[vi]?.isManualOverride) continue;
         const r = sumDataRows(section, vi, hiddenRows);
-        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi]);
+        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
+      }
+    }
+  }
+
+  // Step 1b: Ensure an "Effective PEPM" row exists right after the software subtotal
+  if (result.normalizedHeadcount > 0) {
+    const swSection = findSection(SOFTWARE_SECTION);
+    if (swSection) {
+      const subtotalIdx = swSection.rows.findIndex((r) => r.isSubtotal);
+      const pepmIdx = swSection.rows.findIndex((r) => r.id === 'effective_pepm');
+
+      // Build PEPM values from software subtotal
+      const pepmValues: VendorValue[] = [];
+      for (let vi = 0; vi < vendorCount; vi++) {
+        // Check if existing PEPM cell has manual override
+        const existingPepmVal = pepmIdx >= 0 ? swSection.rows[pepmIdx].values[vi] : null;
+        if (existingPepmVal?.isManualOverride) {
+          pepmValues.push(existingPepmVal);
+          continue;
+        }
+
+        const swResult = sumDataRows(swSection, vi, hiddenRows);
+        const pepm = swResult.sum / 12 / result.normalizedHeadcount;
+        const roundedPepm = Math.round(pepm * 100) / 100;
+        const existing = existingPepmVal || {
+          amount: null, display: '', note: null, citation: null, isConfirmed: true,
+        };
+        const formula = `software_subtotal / 12 / ${result.normalizedHeadcount}`;
+        pepmValues.push({
+          ...existing,
+          amount: roundedPepm,
+          display: formatCurrency(roundedPepm),
+          status: 'currency' as const,
+          isConfirmed: !swResult.hasTbc,
+          note: swResult.hasTbc ? 'Based on unconfirmed subtotal' : 'Auto-calculated',
+          audit: {
+            ...(existing.audit || { sources: [], override: null, formula: null }),
+            formula,
+          },
+        });
+      }
+
+      if (pepmIdx >= 0) {
+        swSection.rows[pepmIdx].values = pepmValues;
+      } else {
+        const pepmRow = {
+          id: 'effective_pepm',
+          label: 'Effective PEPM',
+          values: pepmValues,
+          isSubtotal: false,
+          isPepm: true,
+        };
+        const insertAt = subtotalIdx >= 0 ? subtotalIdx + 1 : swSection.rows.length;
+        swSection.rows.splice(insertAt, 0, pepmRow);
       }
     }
   }
@@ -222,20 +291,20 @@ export function recalculateTable(
 
     const total3yrResult = addResults(y1Result, y2Result, y3Result);
 
-    const totalsMap: Record<string, SumResult> = {
-      year1_before_discounts: y1BeforeResult,
-      year1_discounts: allDiscounts,
-      year1: y1Result,
-      year2: y2Result,
-      year3: y3Result,
-      total3yr: total3yrResult,
+    const totalsMap: Record<string, { result: SumResult; formula: string }> = {
+      year1_before_discounts: { result: y1BeforeResult, formula: 'software_subtotal + impl_total + service_total' },
+      year1_discounts: { result: allDiscounts, formula: 'SUM(enabled_discounts)' },
+      year1: { result: y1Result, formula: 'year1_before_discounts + year1_discounts' },
+      year2: { result: y2Result, formula: `(software + service)×${(1 + growthY2).toFixed(2)} + recurring_discounts` },
+      year3: { result: y3Result, formula: `(software + service)×${(1 + growthY3).toFixed(2)} + recurring_discounts` },
+      total3yr: { result: total3yrResult, formula: 'year1 + year2 + year3' },
     };
 
     for (const row of totalsSection.rows) {
       if (row.values[vi]?.isManualOverride) continue;
       if (row.id in totalsMap) {
-        const r = totalsMap[row.id];
-        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi]);
+        const { result: r, formula } = totalsMap[row.id];
+        row.values[vi] = makeValue(r.sum, r.hasTbc, r.tbcCount, row.values[vi], formula);
       }
     }
   }

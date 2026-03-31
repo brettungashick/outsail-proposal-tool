@@ -422,6 +422,125 @@ describe('recalculateTable', () => {
     });
   });
 
+  describe('PEPM row calculation', () => {
+    it('inserts Effective PEPM row after software subtotal', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const swSection = result.sections.find(s => s.name === 'Software Fees (Recurring)')!;
+      const pepmRow = swSection.rows.find(r => r.id === 'effective_pepm');
+      expect(pepmRow).toBeDefined();
+      expect(pepmRow!.isPepm).toBe(true);
+      expect(pepmRow!.label).toBe('Effective PEPM');
+    });
+
+    it('calculates PEPM as software_subtotal / 12 / headcount', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const pepmRow = getRow(result, 'effective_pepm');
+
+      // Vendor A: 96000 / 12 / 500 = 16.00
+      expect(pepmRow.values[0].amount).toBe(16);
+      // Vendor B: 78000 / 12 / 500 = 13.00
+      expect(pepmRow.values[1].amount).toBe(13);
+    });
+
+    it('PEPM row placed right after subtotal', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const swSection = result.sections.find(s => s.name === 'Software Fees (Recurring)')!;
+      const subtotalIdx = swSection.rows.findIndex(r => r.id === 'sw_subtotal');
+      const pepmIdx = swSection.rows.findIndex(r => r.id === 'effective_pepm');
+      expect(pepmIdx).toBe(subtotalIdx + 1);
+    });
+
+    it('PEPM is not inserted when headcount is 0', () => {
+      const table = makeTable({ normalizedHeadcount: 0 });
+      const result = recalculateTable(table, {}, {});
+      const swSection = result.sections.find(s => s.name === 'Software Fees (Recurring)')!;
+      const pepmRow = swSection.rows.find(r => r.id === 'effective_pepm');
+      expect(pepmRow).toBeUndefined();
+    });
+
+    it('PEPM excludes hidden rows from calculation', () => {
+      const hidden: HiddenRows = { 'sw_payroll': true };
+      const result = recalculateTable(makeTable(), {}, hidden);
+      const pepmRow = getRow(result, 'effective_pepm');
+
+      // Vendor A: 60000 / 12 / 500 = 10.00
+      expect(pepmRow.values[0].amount).toBe(10);
+    });
+
+    it('PEPM respects isManualOverride', () => {
+      const table = makeTable();
+      // Pre-insert a PEPM row with manual override
+      const swSection = table.sections.find(s => s.name === 'Software Fees (Recurring)')!;
+      const subtotalIdx = swSection.rows.findIndex(r => r.isSubtotal);
+      swSection.rows.splice(subtotalIdx + 1, 0, {
+        id: 'effective_pepm',
+        label: 'Effective PEPM',
+        isPepm: true,
+        values: [
+          { amount: 99.99, display: '$99.99', note: 'Manual', citation: null, isConfirmed: true, isManualOverride: true },
+          { amount: 50, display: '$50.00', note: null, citation: null, isConfirmed: true },
+        ],
+      });
+
+      const result = recalculateTable(table, {}, {});
+      const pepmRow = getRow(result, 'effective_pepm');
+
+      // Vendor A stays at manual override
+      expect(pepmRow.values[0].amount).toBe(99.99);
+      // Vendor B is auto-calculated: 78000 / 12 / 500 = 13.00
+      expect(pepmRow.values[1].amount).toBe(13);
+    });
+
+    it('does not double-insert PEPM on repeated recalculation', () => {
+      const table = makeTable();
+      const result1 = recalculateTable(table, {}, {});
+      const result2 = recalculateTable(result1, {}, {});
+      const swSection = result2.sections.find(s => s.name === 'Software Fees (Recurring)')!;
+      const pepmRows = swSection.rows.filter(r => r.id === 'effective_pepm');
+      expect(pepmRows).toHaveLength(1);
+    });
+
+    it('PEPM is excluded from subtotal sum', () => {
+      // Run once to insert PEPM, then run again and check subtotal hasn't changed
+      const result1 = recalculateTable(makeTable(), {}, {});
+      const result2 = recalculateTable(result1, {}, {});
+
+      // Subtotal should still be 96000, not 96000 + 16 (PEPM)
+      expect(getAmount(result2, 'sw_subtotal', 0)).toBe(96000);
+    });
+  });
+
+  describe('audit formula tracking', () => {
+    it('adds formula to subtotal cells', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const subtotalVal = getRow(result, 'sw_subtotal').values[0];
+      expect(subtotalVal.audit).toBeDefined();
+      expect(subtotalVal.audit!.formula).toContain('SUM(');
+      expect(subtotalVal.audit!.formula).toContain('sw_core_hr');
+    });
+
+    it('adds formula to totals cells', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const y1Val = getRow(result, 'year1').values[0];
+      expect(y1Val.audit).toBeDefined();
+      expect(y1Val.audit!.formula).toBe('year1_before_discounts + year1_discounts');
+    });
+
+    it('includes growth factor in Y2/Y3 formula', () => {
+      const table = makeTable({ headcountGrowthY2: 10 });
+      const result = recalculateTable(table, {}, {});
+      const y2Val = getRow(result, 'year2').values[0];
+      expect(y2Val.audit!.formula).toContain('1.10');
+    });
+
+    it('PEPM cell has formula', () => {
+      const result = recalculateTable(makeTable(), {}, {});
+      const pepmVal = getRow(result, 'effective_pepm').values[0];
+      expect(pepmVal.audit).toBeDefined();
+      expect(pepmVal.audit!.formula).toContain('software_subtotal / 12 / 500');
+    });
+  });
+
   describe('TBC (To be confirmed) propagation', () => {
     it('marks subtotal as unconfirmed when any data row is TBC', () => {
       const table = makeTable();
