@@ -3,7 +3,6 @@
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState, useCallback } from 'react';
-import Navbar from '@/components/Navbar';
 import FileUpload from '@/components/FileUpload';
 import DocumentList from '@/components/DocumentList';
 import ShareManager from '@/components/ShareManager';
@@ -153,21 +152,19 @@ export default function ProjectPage() {
 
   if (authStatus === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">
           Project not found
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
