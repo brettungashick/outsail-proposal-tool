@@ -38,6 +38,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const isOwner = project.advisorId === userId;
     const isAdmin = userRole === 'admin';
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
 
     return NextResponse.json({ ...project, isOwner, isAdmin });
   } catch (err) {
@@ -65,6 +68,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const isOwner = project.advisorId === userId;
     const isAdmin = userRole === 'admin';
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
 
     return NextResponse.json({ ...project, shareLinks: [], isOwner, isAdmin });
   }

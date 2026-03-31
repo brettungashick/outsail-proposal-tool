@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/access';
+import { getSessionUser, requireDocumentAccess } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { validateBody, documentUpdateSchema } from '@/lib/schemas';
 
@@ -7,6 +7,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const hasAccess = await requireDocumentAccess(params.id, user.id, user.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 });
   }
 
   const document = await prisma.document.findUnique({

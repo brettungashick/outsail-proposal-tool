@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser, getAppBaseUrl } from '@/lib/access';
+import { getSessionUser, getAppBaseUrl, requireAnalysisAccess } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { generateComparison, isApiKeyConfigured } from '@/lib/claude';
 import { ParsedProposal } from '@/types';
@@ -15,6 +15,11 @@ export async function POST(
   }
 
   const { id } = await params;
+
+  const hasAccess = await requireAnalysisAccess(id, user.id, user.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
+  }
 
   const analysis = await prisma.analysis.findUnique({
     where: { id },

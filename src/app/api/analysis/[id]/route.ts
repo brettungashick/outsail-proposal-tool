@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser } from '@/lib/access';
+import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 import { createHash } from 'crypto';
 import { prisma } from '@/lib/prisma';
 import { validateBody, analysisUpdateSchema } from '@/lib/schemas';
@@ -18,6 +18,11 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const hasAccess = await requireAnalysisAccess(params.id, user.id, user.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
   const analysis = await prisma.analysis.findUnique({
@@ -39,6 +44,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const user = await getSessionUser();
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const hasAccess = await requireAnalysisAccess(params.id, user.id, user.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Analysis not found' }, { status: 404 });
   }
 
   const userId = user.id;
