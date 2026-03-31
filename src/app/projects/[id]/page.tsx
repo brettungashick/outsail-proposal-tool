@@ -81,9 +81,12 @@ export default function ProjectPage() {
         setActiveTab('analysis');
         setAnalyzing(false);
       }
+    } else if (res.status === 401) {
+      router.push('/login');
+      return;
     }
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, router]);
 
   useEffect(() => {
     if (authStatus === 'authenticated') fetchProject();
