@@ -114,7 +114,7 @@ export interface SourcePointer {
 
 export interface CellAudit {
   sources: SourcePointer[];
-  override: { oldDisplay: string; oldAmount: number | null; userId: string; timestamp: string } | null;
+  override: { priorDisplay: string; priorAmount: number | null; overriddenBy: string; overriddenAt: string } | null;
   formula: string | null;
   playbookRuleId?: string;
   playbookRuleVersion?: number;

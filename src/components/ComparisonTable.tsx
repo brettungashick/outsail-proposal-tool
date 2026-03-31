@@ -22,10 +22,15 @@ interface ComparisonTableProps {
   vendorLogos?: Record<string, string>;
   onAddRow?: (sectionIndex: number) => void;
   onDeleteRow?: (sectionIndex: number, rowIndex: number) => void;
+  onHeadcountChange?: (newHeadcount: number) => void;
   onRowLabelEdit?: (sectionIndex: number, rowIndex: number, newLabel: string) => void;
   onCellStatusChange?: (sectionIndex: number, rowIndex: number, vendorIndex: number, newStatus: CellStatus) => void;
   onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
   onClearOverride?: (sectionIndex: number, rowIndex: number, vendorIndex: number) => void;
+  onAuditClick?: (sectionIndex: number, rowIndex: number, vendorIndex: number) => void;
+  headcountGrowthY2?: number;
+  headcountGrowthY3?: number;
+  onHeadcountGrowthChange?: (year: 2 | 3, percent: number) => void;
 }
 
 const TOTALS_SECTION = 'Totals';
@@ -42,10 +47,15 @@ export default function ComparisonTable({
   vendorLogos,
   onAddRow,
   onDeleteRow,
+  onHeadcountChange,
   onRowLabelEdit,
   onCellStatusChange,
   onRowReorder,
   onClearOverride,
+  onAuditClick,
+  headcountGrowthY2,
+  headcountGrowthY3,
+  onHeadcountGrowthChange,
 }: ComparisonTableProps) {
   const sectionColors: Record<string, string> = {
     'Software Fees (Recurring)': 'bg-blue-600',
@@ -86,6 +96,37 @@ export default function ComparisonTable({
         })}
       </div>
 
+      {/* Year 2/3 headcount growth controls */}
+      {onHeadcountGrowthChange && isEditable && (
+        <div className="flex items-center gap-4 mb-3 px-1 text-sm">
+          <span className="text-slate-500 text-xs font-medium">Headcount Growth:</span>
+          <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+            Year 2
+            <input
+              type="number"
+              value={headcountGrowthY2 ?? 0}
+              onChange={(e) => onHeadcountGrowthChange(2, parseFloat(e.target.value) || 0)}
+              className="w-16 px-1.5 py-1 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 outline-none"
+              step="1"
+              min="0"
+            />
+            %
+          </label>
+          <label className="flex items-center gap-1.5 text-slate-600 text-xs">
+            Year 3
+            <input
+              type="number"
+              value={headcountGrowthY3 ?? 0}
+              onChange={(e) => onHeadcountGrowthChange(3, parseFloat(e.target.value) || 0)}
+              className="w-16 px-1.5 py-1 border border-slate-300 rounded text-xs text-center focus:ring-1 focus:ring-blue-400 outline-none"
+              step="1"
+              min="0"
+            />
+            %
+          </label>
+        </div>
+      )}
+
       <table className="w-full border-collapse">
         <thead>
           <tr className="bg-slate-100">
@@ -102,19 +143,12 @@ export default function ComparisonTable({
             ))}
           </tr>
           {data.normalizedHeadcount > 0 && (
-            <tr className="bg-slate-50">
-              <td className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200">
-                Normalized to
-              </td>
-              {data.vendors.map((vendor) => (
-                <td
-                  key={vendor}
-                  className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200 text-center"
-                >
-                  {data.normalizedHeadcount} employees
-                </td>
-              ))}
-            </tr>
+            <HeadcountRow
+              headcount={data.normalizedHeadcount}
+              vendorCount={data.vendors.length}
+              isEditable={isEditable && !!onHeadcountChange}
+              onHeadcountChange={onHeadcountChange}
+            />
           )}
         </thead>
         <tbody>
@@ -137,11 +171,80 @@ export default function ComparisonTable({
               onCellStatusChange={onCellStatusChange}
               onRowReorder={onRowReorder}
               onClearOverride={onClearOverride}
+              onAuditClick={onAuditClick}
             />
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+function HeadcountRow({
+  headcount,
+  vendorCount,
+  isEditable,
+  onHeadcountChange,
+}: {
+  headcount: number;
+  vendorCount: number;
+  isEditable: boolean;
+  onHeadcountChange?: (newHeadcount: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(headcount));
+
+  const handleSave = () => {
+    setEditing(false);
+    const parsed = parseInt(draft.replace(/[^0-9]/g, ''), 10);
+    if (!isNaN(parsed) && parsed > 0 && parsed !== headcount) {
+      onHeadcountChange?.(parsed);
+    } else {
+      setDraft(String(headcount));
+    }
+  };
+
+  return (
+    <tr className="bg-slate-50">
+      <td className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200">
+        Normalized to
+      </td>
+      {Array.from({ length: vendorCount }).map((_, i) => (
+        <td
+          key={i}
+          className="px-4 py-1.5 text-xs text-slate-500 border border-slate-200 text-center"
+        >
+          {isEditable && editing ? (
+            <input
+              className="w-20 px-1.5 py-0.5 text-xs text-center border border-blue-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={handleSave}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSave();
+                if (e.key === 'Escape') {
+                  setDraft(String(headcount));
+                  setEditing(false);
+                }
+              }}
+              autoFocus={i === 0}
+            />
+          ) : (
+            <span
+              className={isEditable ? 'cursor-pointer hover:underline' : ''}
+              onClick={() => {
+                if (isEditable) {
+                  setDraft(String(headcount));
+                  setEditing(true);
+                }
+              }}
+            >
+              {headcount} employees
+            </span>
+          )}
+        </td>
+      ))}
+    </tr>
   );
 }
 
@@ -162,6 +265,7 @@ function SectionBlock({
   onCellStatusChange,
   onRowReorder,
   onClearOverride,
+  onAuditClick,
 }: {
   section: TableSection;
   sectionIndex: number;
@@ -179,6 +283,7 @@ function SectionBlock({
   onCellStatusChange?: (si: number, ri: number, vi: number, newStatus: CellStatus) => void;
   onRowReorder?: (sectionIndex: number, fromIndex: number, toIndex: number) => void;
   onClearOverride?: (si: number, ri: number, vi: number) => void;
+  onAuditClick?: (si: number, ri: number, vi: number) => void;
 }) {
   const isDiscountSection = section.name === 'Discounts';
   const isTotalsSection = section.name === TOTALS_SECTION;
@@ -344,6 +449,8 @@ function SectionBlock({
                     isManualOverride={val.isManualOverride === true}
                     note={val.note}
                     status={val.status}
+                    audit={val.audit}
+                    citation={val.citation}
                     onSave={(newDisplay, newAmount) =>
                       onCellEdit(sectionIndex, rowIdx, vendorIdx, newDisplay, newAmount)
                     }
@@ -353,6 +460,10 @@ function SectionBlock({
                     }
                     onClearOverride={onClearOverride
                       ? () => onClearOverride(sectionIndex, rowIdx, vendorIdx)
+                      : undefined
+                    }
+                    onAuditClick={onAuditClick
+                      ? () => onAuditClick(sectionIndex, rowIdx, vendorIdx)
                       : undefined
                     }
                   />

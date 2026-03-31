@@ -3,13 +3,15 @@
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef } from 'react';
-import Navbar from '@/components/Navbar';
+import Sidebar from '@/components/Sidebar';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
-import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus } from '@/types';
+import AuditDrawer from '@/components/AuditDrawer';
+import PromoteToMemory from '@/components/PromoteToMemory';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus, CellAuditEvent, VendorValue } from '@/types';
 import { recalculateTable } from '@/lib/recalculate';
 import { generateId } from '@/lib/utils';
 
@@ -30,8 +32,20 @@ interface AnalysisData {
 
 type AnalysisTab = 'summary' | 'vendor-detail';
 
+interface PromoteEvent {
+  eventId?: string;
+  vendorName: string;
+  sectionName: string;
+  rowLabel: string;
+  editType: 'status_change' | 'label_change' | 'value_change';
+  oldDisplay: string;
+  newDisplay: string;
+  oldStatus?: string;
+  newStatus?: string;
+}
+
 export default function AnalysisPage() {
-  const { status: authStatus } = useSession();
+  const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const params = useParams();
   const projectId = params.id as string;
@@ -52,6 +66,15 @@ export default function AnalysisPage() {
 
   const [vendorColors, setVendorColors] = useState<Record<string, string>>({});
   const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
+
+  // Audit state
+  const [auditLog, setAuditLog] = useState<CellAuditEvent[]>([]);
+  const [auditDrawer, setAuditDrawer] = useState<{
+    isOpen: boolean;
+    cellPath: string;
+    vendorValue: VendorValue;
+  }>({ isOpen: false, cellPath: '', vendorValue: { amount: null, display: '', note: null, citation: null, isConfirmed: false } });
+  const [promoteEvent, setPromoteEvent] = useState<PromoteEvent | null>(null);
 
   // Keep ref in sync so debounced save always uses latest analysis
   useEffect(() => {
@@ -113,6 +136,11 @@ export default function AnalysisPage() {
       if (data.hiddenRows) {
         try { setHiddenRows(JSON.parse(data.hiddenRows)); } catch { setHiddenRows({}); }
       }
+      // Load audit log from comparison data
+      try {
+        const parsed = JSON.parse(data.comparisonData);
+        if (parsed.auditLog) setAuditLog(parsed.auditLog);
+      } catch { /* ignore */ }
     }
     setLoading(false);
   }, [projectId, router]);
@@ -134,6 +162,74 @@ export default function AnalysisPage() {
   const citations: Citation[] = analysis?.citations ? JSON.parse(analysis.citations) : [];
 
   const canEdit = isOwner || isAdmin;
+
+  // Emit a learning event (fire-and-forget to backend)
+  const emitLearningEvent = useCallback((event: {
+    sectionName: string;
+    rowLabel: string;
+    vendorName: string;
+    editType: string;
+    oldDisplay: string;
+    newDisplay: string;
+    oldAmount: number | null;
+    newAmount: number | null;
+    oldStatus?: string;
+    newStatus?: string;
+    cellPath: string;
+  }) => {
+    if (!analysis) return;
+
+    // Add to local audit log
+    const auditEvent: CellAuditEvent = {
+      type: 'user_override_cell',
+      timestamp: new Date().toISOString(),
+      cellPath: event.cellPath,
+      userId: (session?.user as { id?: string })?.id || null,
+      display: event.newDisplay,
+      amount: event.newAmount,
+    };
+    setAuditLog((prev) => [...prev, auditEvent]);
+
+    // Fire-and-forget to backend
+    fetch('/api/learning-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analysisId: analysis.id,
+        eventType: 'user_override_cell',
+        sectionName: event.sectionName,
+        rowLabel: event.rowLabel,
+        vendorName: event.vendorName,
+        editType: event.editType,
+        oldDisplay: event.oldDisplay,
+        newDisplay: event.newDisplay,
+        oldAmount: event.oldAmount,
+        newAmount: event.newAmount,
+        oldStatus: event.oldStatus || null,
+        newStatus: event.newStatus || null,
+        cellPath: event.cellPath,
+      }),
+    }).then((res) => {
+      if (res.ok) {
+        res.json().then((created) => {
+          // Show promote-to-memory toast for value/status changes
+          if (event.editType === 'value_change' || event.editType === 'status_change') {
+            setPromoteEvent({
+              eventId: created.id,
+              vendorName: event.vendorName,
+              sectionName: event.sectionName,
+              rowLabel: event.rowLabel,
+              editType: event.editType as 'value_change' | 'status_change',
+              oldDisplay: event.oldDisplay,
+              newDisplay: event.newDisplay,
+              oldStatus: event.oldStatus,
+              newStatus: event.newStatus,
+            });
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [analysis, session]);
 
   // Helper to save a field with error handling
   const saveToApi = useCallback(async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
@@ -185,7 +281,6 @@ export default function AnalysisPage() {
       const pending = pendingSaveRef.current;
       const current = analysisRef.current;
       if (pending && current) {
-        // Use sendBeacon for reliable unload saves
         navigator.sendBeacon(
           `/api/analysis/${current.id}`,
           new Blob([JSON.stringify({
@@ -222,12 +317,13 @@ export default function AnalysisPage() {
     const updated = structuredClone(comparisonData);
     const row = updated.sections[sectionIndex].rows[rowIndex];
     const val = row.values[vendorIndex];
+    const oldDisplay = val.display;
+    const oldAmount = val.amount;
 
     val.display = newDisplayValue;
     if (newAmount !== null) {
       val.amount = newAmount;
     } else {
-      // Try to parse from display (strip currency symbols and /yr suffix)
       const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim());
       if (!isNaN(numVal)) {
         val.amount = numVal;
@@ -239,6 +335,19 @@ export default function AnalysisPage() {
     if (isComputedRow) {
       val.isManualOverride = true;
     }
+
+    // Emit learning event
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: row.label,
+      vendorName: updated.vendors[vendorIndex],
+      editType: 'value_change',
+      oldDisplay,
+      newDisplay: newDisplayValue,
+      oldAmount,
+      newAmount: val.amount,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`,
+    });
 
     // Recalculate subtotals and totals
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
@@ -257,7 +366,6 @@ export default function AnalysisPage() {
     const updated = structuredClone(comparisonData);
     delete updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex].isManualOverride;
 
-    // Recalculate will now recompute this cell
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
@@ -275,6 +383,8 @@ export default function AnalysisPage() {
     const updated = structuredClone(comparisonData);
     const row = updated.sections[sectionIndex].rows[rowIndex];
     const val = row.values[vendorIndex];
+    const oldDisplay = val.display;
+    const oldStatus = val.status;
 
     const displayMap: Record<CellStatus, string> = {
       currency: val.display,
@@ -289,7 +399,6 @@ export default function AnalysisPage() {
     val.status = newStatus;
     val.isConfirmed = newStatus !== 'tbc';
     if (newStatus === 'currency') {
-      // Switching back to currency: if amount was nullified, mark as TBC
       if (val.amount === null) {
         val.display = 'To be confirmed';
         val.status = 'tbc';
@@ -308,6 +417,21 @@ export default function AnalysisPage() {
       val.isManualOverride = true;
     }
 
+    // Emit learning event
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: row.label,
+      vendorName: updated.vendors[vendorIndex],
+      editType: 'status_change',
+      oldDisplay,
+      newDisplay: val.display,
+      oldAmount: val.amount,
+      newAmount: null,
+      oldStatus,
+      newStatus,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`,
+    });
+
     const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
     const newJson = JSON.stringify(recalculated);
     setAnalysis({ ...analysis, comparisonData: newJson });
@@ -320,7 +444,6 @@ export default function AnalysisPage() {
     updated[vendorName][discountId] = enabled;
     setDiscountToggles(updated);
 
-    // Recalculate with new toggles
     if (comparisonData && analysis) {
       const recalculated = recalculateTable(comparisonData, updated, hiddenRows);
       const newJson = JSON.stringify(recalculated);
@@ -372,7 +495,6 @@ export default function AnalysisPage() {
       isSubtotal: false,
     };
 
-    // Insert before subtotal row if one exists
     const subtotalIdx = section.rows.findIndex(r => r.isSubtotal);
     if (subtotalIdx >= 0) {
       section.rows.splice(subtotalIdx, 0, newRow);
@@ -402,7 +524,22 @@ export default function AnalysisPage() {
     if (!comparisonData || !analysis) return;
 
     const updated = structuredClone(comparisonData);
-    updated.sections[sectionIndex].rows[rowIndex].label = newLabel;
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const oldLabel = row.label;
+    row.label = newLabel;
+
+    // Emit learning event for label change
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: newLabel,
+      vendorName: '*',
+      editType: 'label_change',
+      oldDisplay: oldLabel,
+      newDisplay: newLabel,
+      oldAmount: null,
+      newAmount: null,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].label`,
+    });
 
     const newJson = JSON.stringify(updated);
     setAnalysis({ ...analysis, comparisonData: newJson });
@@ -420,6 +557,38 @@ export default function AnalysisPage() {
     const newJson = JSON.stringify(updated);
     setAnalysis({ ...analysis, comparisonData: newJson });
     debouncedSaveComparison(newJson);
+  };
+
+  const handleHeadcountChange = (newHeadcount: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    updated.normalizedHeadcount = newHeadcount;
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleHeadcountGrowthChange = (year: 2 | 3, percent: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    if (year === 2) updated.headcountGrowthY2 = percent;
+    else updated.headcountGrowthY3 = percent;
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleAuditClick = (sectionIndex: number, rowIndex: number, vendorIndex: number) => {
+    if (!comparisonData) return;
+    const val = comparisonData.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+    const cellPath = `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`;
+    setAuditDrawer({ isOpen: true, cellPath, vendorValue: val });
   };
 
   const handleUpdateStandardization = (notes: string[]) => {
@@ -448,33 +617,30 @@ export default function AnalysisPage() {
 
   if (authStatus === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   if (!analysis || !comparisonData) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center">
           <p className="text-slate-500 mb-4">No analysis available</p>
           <button
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
@@ -482,7 +648,7 @@ export default function AnalysisPage() {
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
           <div className="flex justify-between items-start">
             <div>
@@ -595,10 +761,15 @@ export default function AnalysisPage() {
                 vendorLogos={vendorLogos}
                 onAddRow={canEdit ? handleAddRow : undefined}
                 onDeleteRow={canEdit ? handleDeleteRow : undefined}
+                onHeadcountChange={canEdit ? handleHeadcountChange : undefined}
                 onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
                 onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
                 onRowReorder={canEdit ? handleRowReorder : undefined}
                 onClearOverride={canEdit ? handleClearOverride : undefined}
+                onAuditClick={handleAuditClick}
+                headcountGrowthY2={comparisonData.headcountGrowthY2}
+                headcountGrowthY3={comparisonData.headcountGrowthY3}
+                onHeadcountGrowthChange={canEdit ? handleHeadcountGrowthChange : undefined}
               />
             </div>
 
@@ -641,6 +812,21 @@ export default function AnalysisPage() {
           fetchAnalysis(versionId);
         }}
       />
-    </div>
+
+      {/* Audit Drawer */}
+      <AuditDrawer
+        isOpen={auditDrawer.isOpen}
+        onClose={() => setAuditDrawer((prev) => ({ ...prev, isOpen: false }))}
+        cellPath={auditDrawer.cellPath}
+        vendorValue={auditDrawer.vendorValue}
+        auditLog={auditLog}
+      />
+
+      {/* Promote to Memory toast */}
+      <PromoteToMemory
+        event={promoteEvent}
+        onDismiss={() => setPromoteEvent(null)}
+      />
+    </Sidebar>
   );
 }

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { CellStatus } from '@/types';
+import { CellStatus, CellAudit, Citation } from '@/types';
+import CellAuditTooltip from './CellAuditTooltip';
 
 const STATUS_OPTIONS: { value: CellStatus; label: string }[] = [
   { value: 'tbc', label: 'To be confirmed' },
@@ -20,9 +21,12 @@ interface EditableCellProps {
   isManualOverride?: boolean;
   note: string | null;
   status?: CellStatus;
+  audit?: CellAudit;
+  citation?: Citation | null;
   onSave: (newDisplay: string, newAmount: number | null) => void;
   onStatusChange?: (status: CellStatus) => void;
   onClearOverride?: () => void;
+  onAuditClick?: () => void;
 }
 
 export default function EditableCell({
@@ -33,12 +37,17 @@ export default function EditableCell({
   isManualOverride,
   note,
   status,
+  audit,
+  citation,
   onSave,
   onStatusChange,
   onClearOverride,
+  onAuditClick,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -67,8 +76,6 @@ export default function EditableCell({
   };
 
   const handleBlur = (e: React.FocusEvent) => {
-    // If focus is moving to another element within the editing container (e.g. the select),
-    // don't exit editing mode yet.
     if (containerRef.current?.contains(e.relatedTarget as Node)) return;
     handleSave();
   };
@@ -99,7 +106,6 @@ export default function EditableCell({
     }
   };
 
-  // Determine visual state from status (with display-string fallback for old data)
   const lowerValue = value.toLowerCase().trim();
   const isIncluded = status
     ? status === 'included' || status === 'included_in_bundle'
@@ -164,7 +170,7 @@ export default function EditableCell({
     <div
       className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
         canEdit ? 'cursor-pointer hover:bg-blue-50/50' : ''
-      } ${isComputed && !isManualOverride ? 'bg-slate-50/50' : ''} ${isManualOverride ? 'bg-amber-50/30' : ''}`}
+      } ${isComputed && !isManualOverride ? 'bg-slate-50/50' : ''} ${isManualOverride ? 'bg-amber-50/30' : ''} group/cell relative`}
       onClick={() => canEdit && setEditing(true)}
       title={note || undefined}
     >
@@ -219,6 +225,27 @@ export default function EditableCell({
               </span>
             )}
           </>
+        )}
+        {audit && (audit.sources.length > 0 || audit.override || audit.formula) && onAuditClick && (
+          <span className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); onAuditClick(); }}
+              onMouseEnter={() => {
+                tooltipTimer.current = setTimeout(() => setShowTooltip(true), 200);
+              }}
+              onMouseLeave={() => {
+                if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+                setShowTooltip(false);
+              }}
+              className="opacity-0 group-hover/cell:opacity-100 ml-0.5 text-slate-400 hover:text-outsail-blue-dark transition"
+              title=""
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+            </button>
+            {showTooltip && <CellAuditTooltip audit={audit} citation={citation} />}
+          </span>
         )}
       </div>
     </div>
