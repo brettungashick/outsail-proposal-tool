@@ -78,6 +78,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
   }
 
+  // Only the owner or an admin can delete
+  if (project.advisorId !== userId && userRole !== 'admin') {
+    return NextResponse.json({ error: 'Only the project owner or an admin can delete this project' }, { status: 403 });
+  }
+
   await prisma.project.delete({ where: { id: params.id } });
   return NextResponse.json({ success: true });
 }

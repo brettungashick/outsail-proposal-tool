@@ -58,6 +58,12 @@ export async function GET() {
       }
     };
 
+    await addColumnSafe('User', 'inviteToken', 'TEXT');
+    await addColumnSafe('User', 'inviteStatus', "TEXT NOT NULL DEFAULT 'active'");
+    try {
+      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_inviteToken_key" ON "User"("inviteToken")`);
+    } catch { /* ignore */ }
+
     await addColumnSafe('Document', 'documentType', "TEXT NOT NULL DEFAULT 'initial_quote'");
     await addColumnSafe('Document', 'quoteVersion', 'INTEGER NOT NULL DEFAULT 1');
     await addColumnSafe('Document', 'isActive', 'INTEGER NOT NULL DEFAULT 1');

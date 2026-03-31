@@ -9,13 +9,17 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         String   @default("advisor")
-  createdAt    DateTime @default(now())
-  projects     Project[]
+  id                   String    @id @default(cuid())
+  email                String    @unique
+  passwordHash         String
+  name                 String
+  role                 String    @default("advisor")
+  inviteToken          String?   @unique
+  inviteStatus         String    @default("active") // pending | active
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
+  createdAt            DateTime  @default(now())
+  projects             Project[]
 }
 
 model Project {
