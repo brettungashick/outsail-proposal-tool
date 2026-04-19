@@ -1,11 +1,11 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, vendorCreateSchema } from '@/lib/schemas';
 
 export async function GET() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -17,29 +17,26 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userRole = (session.user as { role?: string }).role;
+  const userRole = user.role;
   if (userRole !== 'admin') {
     return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
   }
 
   const body = await req.json();
-  const { name, logoUrl, accentColor } = body;
-
-  if (!name?.trim()) {
-    return NextResponse.json({ error: 'Vendor name is required' }, { status: 400 });
-  }
+  const validated = validateBody(vendorCreateSchema, body);
+  if (!validated.success) return validated.response;
 
   try {
     const vendor = await prisma.vendor.create({
       data: {
-        name: name.trim(),
-        logoUrl: logoUrl || null,
-        accentColor: accentColor || null,
+        name: validated.data.name,
+        logoUrl: validated.data.logoUrl || null,
+        accentColor: validated.data.accentColor || null,
       },
     });
     return NextResponse.json(vendor, { status: 201 });

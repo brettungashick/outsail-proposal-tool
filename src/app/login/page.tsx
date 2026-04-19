@@ -3,6 +3,8 @@
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import Link from 'next/link';
+import AppLogo from '@/components/AppLogo';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -35,6 +37,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-xl shadow-lg p-8">
           <div className="text-center mb-8">
+            <div className="mx-auto mb-4 flex items-center justify-center">
+              <AppLogo width={180} height={46} />
+            </div>
             <h1 className="text-3xl font-bold text-slate-900">OutSail</h1>
             <p className="text-slate-500 mt-2">Proposal Analysis Tool</p>
           </div>
@@ -55,22 +60,27 @@ export default function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                placeholder="advisor@outsail.com"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none transition"
+                placeholder="advisor@outsail.co"
                 required
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
-                Password
-              </label>
+              <div className="flex justify-between items-center mb-1">
+                <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                  Password
+                </label>
+                <Link href="/forgot-password" className="text-xs text-outsail-blue-dark hover:text-outsail-navy font-medium">
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
+                className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none transition"
                 placeholder="Enter your password"
                 required
               />
@@ -79,7 +89,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-outsail-blue-dark text-white py-2.5 rounded-lg font-medium hover:bg-outsail-navy focus:ring-2 focus:ring-outsail-blue focus:ring-offset-2 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Signing in...' : 'Sign In'}
             </button>

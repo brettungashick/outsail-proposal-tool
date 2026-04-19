@@ -1,12 +1,17 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser, requireDocumentAccess } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, documentUpdateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const hasAccess = await requireDocumentAccess(params.id, user.id, user.role);
+  if (!hasAccess) {
+    return NextResponse.json({ error: 'Document not found' }, { status: 404 });
   }
 
   const document = await prisma.document.findUnique({
@@ -22,13 +27,15 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const userId = user.id;
   const body = await req.json();
+  const validated = validateBody(documentUpdateSchema, body);
+  if (!validated.success) return validated.response;
 
   const document = await prisma.document.findUnique({
     where: { id: params.id },
@@ -39,24 +46,22 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     return NextResponse.json({ error: 'Document not found' }, { status: 404 });
   }
 
-  if (typeof body.isActive === 'boolean') {
-    // Clear parsedData when toggling active status so it gets re-parsed
-    await prisma.document.update({
-      where: { id: params.id },
-      data: { isActive: body.isActive, parsedData: null },
-    });
-  }
+  // Clear parsedData when toggling active status so it gets re-parsed
+  await prisma.document.update({
+    where: { id: params.id },
+    data: { isActive: validated.data.isActive, parsedData: null },
+  });
 
   return NextResponse.json({ success: true });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const userId = user.id;
 
   const document = await prisma.document.findUnique({
     where: { id: params.id },

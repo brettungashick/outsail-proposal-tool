@@ -1,16 +1,16 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, projectCreateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const userId = user.id;
+  const userRole = user.role;
   const scope = req.nextUrl.searchParams.get('scope') || 'mine';
 
   let whereClause = {};
@@ -38,25 +38,27 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const userId = user.id;
   const body = await req.json();
+  const validated = validateBody(projectCreateSchema, body);
+  if (!validated.success) return validated.response;
 
   // Auto-generate project name: "ClientName Month YY"
   const now = new Date();
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'];
-  const autoName = `${body.clientName} ${monthNames[now.getMonth()]} ${String(now.getFullYear()).slice(-2)}`;
+  const autoName = `${validated.data.clientName} ${monthNames[now.getMonth()]} ${String(now.getFullYear()).slice(-2)}`;
 
   const project = await prisma.project.create({
     data: {
       name: autoName,
-      clientName: body.clientName,
-      clientEmail: body.clientEmail || null,
+      clientName: validated.data.clientName,
+      clientEmail: validated.data.clientEmail || null,
       advisorId: userId,
     },
   });

@@ -2,32 +2,50 @@
 
 import { useSession } from 'next-auth/react';
 import { useRouter, useParams } from 'next/navigation';
-import { useEffect, useState, useCallback } from 'react';
-import Navbar from '@/components/Navbar';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import Sidebar from '@/components/Sidebar';
 import ComparisonTable from '@/components/ComparisonTable';
 import NotesSection from '@/components/NotesSection';
 import CitationsSection from '@/components/CitationsSection';
 import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
-import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles } from '@/types';
+import AuditDrawer from '@/components/AuditDrawer';
+import PromoteToMemory from '@/components/PromoteToMemory';
+import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus, CellAuditEvent, VendorValue } from '@/types';
+import { recalculateTable } from '@/lib/recalculate';
+import { generateId } from '@/lib/utils';
 
 interface AnalysisData {
   id: string;
   version: number;
+  status?: string;
   comparisonData: string;
   standardizationNotes: string;
   vendorNotes: string;
   nextSteps: string;
   citations: string;
   discountToggles: string | null;
+  hiddenRows: string | null;
   createdAt: string;
   project: { name: string; clientName: string; isOwner?: boolean; isAdmin?: boolean };
 }
 
 type AnalysisTab = 'summary' | 'vendor-detail';
 
+interface PromoteEvent {
+  eventId?: string;
+  vendorName: string;
+  sectionName: string;
+  rowLabel: string;
+  editType: 'status_change' | 'label_change' | 'value_change';
+  oldDisplay: string;
+  newDisplay: string;
+  oldStatus?: string;
+  newStatus?: string;
+}
+
 export default function AnalysisPage() {
-  const { status: authStatus } = useSession();
+  const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const params = useParams();
   const projectId = params.id as string;
@@ -36,15 +54,53 @@ export default function AnalysisPage() {
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AnalysisTab>('summary');
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
+  const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const analysisRef = useRef<AnalysisData | null>(null);
+
+  const [vendorColors, setVendorColors] = useState<Record<string, string>>({});
+  const [vendorLogos, setVendorLogos] = useState<Record<string, string>>({});
+
+  // Audit state
+  const [auditLog, setAuditLog] = useState<CellAuditEvent[]>([]);
+  const [auditDrawer, setAuditDrawer] = useState<{
+    isOpen: boolean;
+    cellPath: string;
+    vendorValue: VendorValue;
+  }>({ isOpen: false, cellPath: '', vendorValue: { amount: null, display: '', note: null, citation: null, isConfirmed: false } });
+  const [promoteEvent, setPromoteEvent] = useState<PromoteEvent | null>(null);
+
+  // Keep ref in sync so debounced save always uses latest analysis
+  useEffect(() => {
+    analysisRef.current = analysis;
+  }, [analysis]);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
   }, [authStatus, router]);
+
+  // Fetch vendor metadata (logos and colors)
+  useEffect(() => {
+    fetch('/api/vendors')
+      .then((res) => (res.ok ? res.json() : []))
+      .then((vendors: { name: string; logoUrl: string | null; accentColor: string | null }[]) => {
+        const colors: Record<string, string> = {};
+        const logos: Record<string, string> = {};
+        for (const v of vendors) {
+          if (v.accentColor) colors[v.name] = v.accentColor;
+          if (v.logoUrl) logos[v.name] = v.logoUrl;
+        }
+        setVendorColors(colors);
+        setVendorLogos(logos);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchAnalysis = useCallback(async (analysisId?: string) => {
     const projRes = await fetch(`/api/projects/${projectId}`);
@@ -55,7 +111,15 @@ export default function AnalysisPage() {
     const proj = await projRes.json();
     setIsOwner(proj.isOwner);
     setIsAdmin(proj.isAdmin);
-    const targetId = analysisId || proj.analyses?.[0]?.id;
+
+    // If latest analysis is in clarifying state, redirect to project page
+    const latestAnalysis = proj.analyses?.[0];
+    if (latestAnalysis?.status === 'clarifying') {
+      router.push(`/projects/${projectId}`);
+      return;
+    }
+
+    const targetId = analysisId || latestAnalysis?.id;
 
     if (!targetId) {
       setLoading(false);
@@ -66,24 +130,27 @@ export default function AnalysisPage() {
     if (res.ok) {
       const data = await res.json();
       setAnalysis(data);
-      // Load discount toggles
       if (data.discountToggles) {
-        try {
-          setDiscountToggles(JSON.parse(data.discountToggles));
-        } catch {
-          setDiscountToggles({});
-        }
+        try { setDiscountToggles(JSON.parse(data.discountToggles)); } catch { setDiscountToggles({}); }
       }
+      if (data.hiddenRows) {
+        try { setHiddenRows(JSON.parse(data.hiddenRows)); } catch { setHiddenRows({}); }
+      }
+      // Load audit log from comparison data
+      try {
+        const parsed = JSON.parse(data.comparisonData);
+        if (parsed.auditLog) setAuditLog(parsed.auditLog);
+      } catch { /* ignore */ }
     }
     setLoading(false);
-  }, [projectId]);
+  }, [projectId, router]);
 
   useEffect(() => {
     if (authStatus === 'authenticated') fetchAnalysis();
   }, [authStatus, fetchAnalysis]);
 
   const comparisonData: ComparisonTableType | null = analysis
-    ? JSON.parse(analysis.comparisonData)
+    ? (() => { try { return JSON.parse(analysis.comparisonData); } catch { return null; } })()
     : null;
   const standardizationNotes: string[] = analysis?.standardizationNotes
     ? JSON.parse(analysis.standardizationNotes)
@@ -96,57 +163,279 @@ export default function AnalysisPage() {
 
   const canEdit = isOwner || isAdmin;
 
-  const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
+  // Emit a learning event (fire-and-forget to backend)
+  const emitLearningEvent = useCallback((event: {
+    sectionName: string;
+    rowLabel: string;
+    vendorName: string;
+    editType: string;
+    oldDisplay: string;
+    newDisplay: string;
+    oldAmount: number | null;
+    newAmount: number | null;
+    oldStatus?: string;
+    newStatus?: string;
+    cellPath: string;
+  }) => {
     if (!analysis) return;
+
+    // Add to local audit log
+    const auditEvent: CellAuditEvent = {
+      type: 'user_override_cell',
+      timestamp: new Date().toISOString(),
+      cellPath: event.cellPath,
+      userId: (session?.user as { id?: string })?.id || null,
+      display: event.newDisplay,
+      amount: event.newAmount,
+    };
+    setAuditLog((prev) => [...prev, auditEvent]);
+
+    // Fire-and-forget to backend
+    fetch('/api/learning-events', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        analysisId: analysis.id,
+        eventType: 'user_override_cell',
+        sectionName: event.sectionName,
+        rowLabel: event.rowLabel,
+        vendorName: event.vendorName,
+        editType: event.editType,
+        oldDisplay: event.oldDisplay,
+        newDisplay: event.newDisplay,
+        oldAmount: event.oldAmount,
+        newAmount: event.newAmount,
+        oldStatus: event.oldStatus || null,
+        newStatus: event.newStatus || null,
+        cellPath: event.cellPath,
+      }),
+    }).then((res) => {
+      if (res.ok) {
+        res.json().then((created) => {
+          // Show promote-to-memory toast for value/status changes
+          if (event.editType === 'value_change' || event.editType === 'status_change') {
+            setPromoteEvent({
+              eventId: created.id,
+              vendorName: event.vendorName,
+              sectionName: event.sectionName,
+              rowLabel: event.rowLabel,
+              editType: event.editType as 'value_change' | 'status_change',
+              oldDisplay: event.oldDisplay,
+              newDisplay: event.newDisplay,
+              oldStatus: event.oldStatus,
+              newStatus: event.newStatus,
+            });
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [analysis, session]);
+
+  // Helper to save a field with error handling
+  const saveToApi = useCallback(async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
+    const current = analysisRef.current;
+    if (!current) return;
     setSaving(true);
+    setSaveError(null);
     try {
-      await fetch(`/api/analysis/${analysis.id}`, {
+      const res = await fetch(`/api/analysis/${current.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fieldType, fieldPath, oldValue, newValue }),
       });
+      if (!res.ok) {
+        const msg = `Save failed (${res.status})`;
+        console.error(msg, fieldType);
+        setSaveError(msg);
+      }
+    } catch (err) {
+      console.error('Save error:', err);
+      setSaveError('Network error — changes may not be saved');
     } finally {
       setSaving(false);
     }
+  }, []);
+
+  // Pending save ref for flush-on-unload
+  const pendingSaveRef = useRef<{ fieldType: string; newValue: string } | null>(null);
+
+  // Debounced save for comparison data — uses ref to avoid stale closure
+  const debouncedSaveComparison = useCallback((newJson: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    pendingSaveRef.current = { fieldType: 'comparisonData', newValue: newJson };
+    saveTimer.current = setTimeout(() => {
+      const current = analysisRef.current;
+      if (!current) return;
+      pendingSaveRef.current = null;
+      saveToApi('comparisonData', 'comparisonData', current.comparisonData, newJson);
+    }, 500);
+  }, [saveToApi]);
+
+  // Flush pending saves on page unload
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const pending = pendingSaveRef.current;
+      const current = analysisRef.current;
+      if (pending && current) {
+        navigator.sendBeacon(
+          `/api/analysis/${current.id}`,
+          new Blob([JSON.stringify({
+            fieldType: pending.fieldType,
+            fieldPath: pending.fieldType,
+            oldValue: current.comparisonData,
+            newValue: pending.newValue,
+          })], { type: 'application/json' })
+        );
+        pendingSaveRef.current = null;
+      }
+    };
+    window.addEventListener('beforeunload', flush);
+    return () => {
+      flush();
+      window.removeEventListener('beforeunload', flush);
+    };
+  }, []);
+
+  const saveField = async (fieldType: string, fieldPath: string, oldValue: string, newValue: string) => {
+    if (!analysis) return;
+    await saveToApi(fieldType, fieldPath, oldValue, newValue);
   };
 
   const handleCellEdit = (
     sectionIndex: number,
     rowIndex: number,
     vendorIndex: number,
-    newDisplayValue: string
+    newDisplayValue: string,
+    newAmount: number | null
   ) => {
     if (!comparisonData || !analysis) return;
 
-    const updated = { ...comparisonData };
-    const section = { ...updated.sections[sectionIndex] };
-    const row = { ...section.rows[rowIndex] };
-    const val = { ...row.values[vendorIndex] };
-
+    const updated = structuredClone(comparisonData);
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
     const oldDisplay = val.display;
-    val.display = newDisplayValue;
+    const oldAmount = val.amount;
 
-    const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, ''));
-    if (!isNaN(numVal)) {
-      val.amount = numVal;
+    val.display = newDisplayValue;
+    if (newAmount !== null) {
+      val.amount = newAmount;
+    } else {
+      const numVal = parseFloat(newDisplayValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim());
+      if (!isNaN(numVal)) {
+        val.amount = numVal;
+      }
     }
 
-    row.values = [...row.values];
-    row.values[vendorIndex] = val;
-    section.rows = [...section.rows];
-    section.rows[rowIndex] = row;
-    updated.sections = [...updated.sections];
-    updated.sections[sectionIndex] = section;
+    // Mark computed cells as manually overridden so recalculate skips them
+    const isComputedRow = row.isSubtotal || row.isPepm || updated.sections[sectionIndex].name === 'Totals';
+    if (isComputedRow) {
+      val.isManualOverride = true;
+    }
 
-    const newJson = JSON.stringify(updated);
-    setAnalysis({ ...analysis, comparisonData: newJson });
-
-    saveField(
-      'comparisonData',
-      `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}].display`,
+    // Emit learning event
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: row.label,
+      vendorName: updated.vendors[vendorIndex],
+      editType: 'value_change',
       oldDisplay,
-      newJson
-    );
+      newDisplay: newDisplayValue,
+      oldAmount,
+      newAmount: val.amount,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`,
+    });
+
+    // Recalculate subtotals and totals
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleClearOverride = (
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number
+  ) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    delete updated.sections[sectionIndex].rows[rowIndex].values[vendorIndex].isManualOverride;
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleCellStatusChange = (
+    sectionIndex: number,
+    rowIndex: number,
+    vendorIndex: number,
+    newStatus: CellStatus
+  ) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const val = row.values[vendorIndex];
+    const oldDisplay = val.display;
+    const oldStatus = val.status;
+
+    const displayMap: Record<CellStatus, string> = {
+      currency: val.display,
+      tbc: 'To be confirmed',
+      included: 'Included',
+      included_in_bundle: 'Included in bundle',
+      not_included: 'Not included',
+      na: 'N/A',
+      hidden: 'Hidden',
+    };
+
+    val.status = newStatus;
+    val.isConfirmed = newStatus !== 'tbc';
+    if (newStatus === 'currency') {
+      if (val.amount === null) {
+        val.display = 'To be confirmed';
+        val.status = 'tbc';
+        val.isConfirmed = false;
+      } else {
+        val.display = displayMap[newStatus];
+      }
+    } else {
+      val.display = displayMap[newStatus];
+      val.amount = null;
+    }
+
+    // Mark computed cells as manually overridden
+    const isComputedRow = row.isSubtotal || row.isPepm || updated.sections[sectionIndex].name === 'Totals';
+    if (isComputedRow) {
+      val.isManualOverride = true;
+    }
+
+    // Emit learning event
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: row.label,
+      vendorName: updated.vendors[vendorIndex],
+      editType: 'status_change',
+      oldDisplay,
+      newDisplay: val.display,
+      oldAmount: val.amount,
+      newAmount: null,
+      oldStatus,
+      newStatus,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`,
+    });
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
   };
 
   const handleDiscountToggle = (vendorName: string, discountId: string, enabled: boolean) => {
@@ -155,22 +444,151 @@ export default function AnalysisPage() {
     updated[vendorName][discountId] = enabled;
     setDiscountToggles(updated);
 
-    // Persist to server
-    if (analysis) {
-      const newVal = JSON.stringify(updated);
-      setSaving(true);
-      fetch(`/api/analysis/${analysis.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fieldType: 'discountToggles',
-          fieldPath: 'discountToggles',
-          oldValue: analysis.discountToggles || '{}',
-          newValue: newVal,
-        }),
-      }).finally(() => setSaving(false));
-      setAnalysis({ ...analysis, discountToggles: newVal });
+    if (comparisonData && analysis) {
+      const recalculated = recalculateTable(comparisonData, updated, hiddenRows);
+      const newJson = JSON.stringify(recalculated);
+      const togglesJson = JSON.stringify(updated);
+      setAnalysis({ ...analysis, comparisonData: newJson, discountToggles: togglesJson });
+      debouncedSaveComparison(newJson);
+      saveToApi('discountToggles', 'discountToggles', analysis.discountToggles || '{}', togglesJson);
     }
+  };
+
+  const handleToggleHidden = (rowId: string) => {
+    const updated = { ...hiddenRows };
+    if (updated[rowId]) {
+      delete updated[rowId];
+    } else {
+      updated[rowId] = true;
+    }
+    setHiddenRows(updated);
+
+    if (comparisonData && analysis) {
+      const recalculated = recalculateTable(comparisonData, discountToggles, updated);
+      const newJson = JSON.stringify(recalculated);
+      const hiddenJson = JSON.stringify(updated);
+      setAnalysis({ ...analysis, comparisonData: newJson, hiddenRows: hiddenJson });
+      debouncedSaveComparison(newJson);
+      saveToApi('hiddenRows', 'hiddenRows', analysis.hiddenRows || '{}', hiddenJson);
+    }
+  };
+
+  const handleAddRow = (sectionIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const section = updated.sections[sectionIndex];
+    const isDiscountSection = section.name === 'Discounts';
+
+    const newRow = {
+      id: generateId(),
+      label: 'New Item',
+      values: updated.vendors.map(() => ({
+        amount: null,
+        display: 'To be confirmed',
+        note: null,
+        citation: null,
+        isConfirmed: false,
+        status: 'tbc' as const,
+      })),
+      isDiscount: isDiscountSection,
+      isSubtotal: false,
+    };
+
+    const subtotalIdx = section.rows.findIndex(r => r.isSubtotal);
+    if (subtotalIdx >= 0) {
+      section.rows.splice(subtotalIdx, 0, newRow);
+    } else {
+      section.rows.push(newRow);
+    }
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleDeleteRow = (sectionIndex: number, rowIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    updated.sections[sectionIndex].rows.splice(rowIndex, 1);
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleRowLabelEdit = (sectionIndex: number, rowIndex: number, newLabel: string) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const row = updated.sections[sectionIndex].rows[rowIndex];
+    const oldLabel = row.label;
+    row.label = newLabel;
+
+    // Emit learning event for label change
+    emitLearningEvent({
+      sectionName: updated.sections[sectionIndex].name,
+      rowLabel: newLabel,
+      vendorName: '*',
+      editType: 'label_change',
+      oldDisplay: oldLabel,
+      newDisplay: newLabel,
+      oldAmount: null,
+      newAmount: null,
+      cellPath: `sections[${sectionIndex}].rows[${rowIndex}].label`,
+    });
+
+    const newJson = JSON.stringify(updated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleRowReorder = (sectionIndex: number, fromIndex: number, toIndex: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    const rows = updated.sections[sectionIndex].rows;
+    const [moved] = rows.splice(fromIndex, 1);
+    rows.splice(toIndex, 0, moved);
+
+    const newJson = JSON.stringify(updated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleHeadcountChange = (newHeadcount: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    updated.normalizedHeadcount = newHeadcount;
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleHeadcountGrowthChange = (year: 2 | 3, percent: number) => {
+    if (!comparisonData || !analysis) return;
+
+    const updated = structuredClone(comparisonData);
+    if (year === 2) updated.headcountGrowthY2 = percent;
+    else updated.headcountGrowthY3 = percent;
+
+    const recalculated = recalculateTable(updated, discountToggles, hiddenRows);
+    const newJson = JSON.stringify(recalculated);
+    setAnalysis({ ...analysis, comparisonData: newJson });
+    debouncedSaveComparison(newJson);
+  };
+
+  const handleAuditClick = (sectionIndex: number, rowIndex: number, vendorIndex: number) => {
+    if (!comparisonData) return;
+    const val = comparisonData.sections[sectionIndex].rows[rowIndex].values[vendorIndex];
+    const cellPath = `sections[${sectionIndex}].rows[${rowIndex}].values[${vendorIndex}]`;
+    setAuditDrawer({ isOpen: true, cellPath, vendorValue: val });
   };
 
   const handleUpdateStandardization = (notes: string[]) => {
@@ -199,33 +617,30 @@ export default function AnalysisPage() {
 
   if (authStatus === 'loading' || loading) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center text-slate-500">Loading...</div>
-      </div>
+      </Sidebar>
     );
   }
 
   if (!analysis || !comparisonData) {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <Navbar />
+      <Sidebar>
         <div className="max-w-7xl mx-auto px-4 py-12 text-center">
           <p className="text-slate-500 mb-4">No analysis available</p>
           <button
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-blue-600 hover:text-blue-800 text-sm"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
         </div>
-      </div>
+      </Sidebar>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <Navbar />
+    <Sidebar>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
@@ -233,7 +648,7 @@ export default function AnalysisPage() {
             onClick={() => router.push(`/projects/${projectId}`)}
             className="text-sm text-blue-600 hover:text-blue-800 mb-2 inline-block"
           >
-            ← Back to Project
+            &larr; Back to Project
           </button>
           <div className="flex justify-between items-start">
             <div>
@@ -246,6 +661,15 @@ export default function AnalysisPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {saveError && (
+                <button
+                  onClick={() => setSaveError(null)}
+                  className="text-xs text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200 hover:bg-red-100"
+                  title="Click to dismiss"
+                >
+                  {saveError}
+                </button>
+              )}
               {saving && (
                 <span className="text-xs text-blue-500">Saving...</span>
               )}
@@ -331,6 +755,21 @@ export default function AnalysisPage() {
                 onCellEdit={handleCellEdit}
                 discountToggles={discountToggles}
                 onDiscountToggle={canEdit ? handleDiscountToggle : undefined}
+                hiddenRows={hiddenRows}
+                onToggleHidden={canEdit ? handleToggleHidden : undefined}
+                vendorColors={vendorColors}
+                vendorLogos={vendorLogos}
+                onAddRow={canEdit ? handleAddRow : undefined}
+                onDeleteRow={canEdit ? handleDeleteRow : undefined}
+                onHeadcountChange={canEdit ? handleHeadcountChange : undefined}
+                onRowLabelEdit={canEdit ? handleRowLabelEdit : undefined}
+                onCellStatusChange={canEdit ? handleCellStatusChange : undefined}
+                onRowReorder={canEdit ? handleRowReorder : undefined}
+                onClearOverride={canEdit ? handleClearOverride : undefined}
+                onAuditClick={handleAuditClick}
+                headcountGrowthY2={comparisonData.headcountGrowthY2}
+                headcountGrowthY3={comparisonData.headcountGrowthY3}
+                onHeadcountGrowthChange={canEdit ? handleHeadcountGrowthChange : undefined}
               />
             </div>
 
@@ -373,6 +812,21 @@ export default function AnalysisPage() {
           fetchAnalysis(versionId);
         }}
       />
-    </div>
+
+      {/* Audit Drawer */}
+      <AuditDrawer
+        isOpen={auditDrawer.isOpen}
+        onClose={() => setAuditDrawer((prev) => ({ ...prev, isOpen: false }))}
+        cellPath={auditDrawer.cellPath}
+        vendorValue={auditDrawer.vendorValue}
+        auditLog={auditLog}
+      />
+
+      {/* Promote to Memory toast */}
+      <PromoteToMemory
+        event={promoteEvent}
+        onDismiss={() => setPromoteEvent(null)}
+      />
+    </Sidebar>
   );
 }

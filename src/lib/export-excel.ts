@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { ComparisonTable, Citation } from '@/types';
+import { formatCurrency } from '@/lib/utils';
 
 export function generateExcelBuffer(
   comparisonData: ComparisonTable,
@@ -26,7 +27,7 @@ export function generateExcelBuffer(
     for (const row of section.rows) {
       compRows.push([
         row.label,
-        ...row.values.map((v) => (v.amount != null ? v.amount : v.display)),
+        ...row.values.map((v) => (v.amount != null ? formatCurrency(v.amount) : v.display)),
       ]);
     }
   }

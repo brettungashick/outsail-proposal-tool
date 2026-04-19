@@ -1,25 +1,59 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { CellStatus, CellAudit, Citation } from '@/types';
+import CellAuditTooltip from './CellAuditTooltip';
+
+const STATUS_OPTIONS: { value: CellStatus; label: string }[] = [
+  { value: 'tbc', label: 'To be confirmed' },
+  { value: 'included', label: 'Included' },
+  { value: 'included_in_bundle', label: 'Included in bundle' },
+  { value: 'not_included', label: 'Not included' },
+  { value: 'na', label: 'N/A' },
+  { value: 'hidden', label: 'Hidden' },
+];
 
 interface EditableCellProps {
   value: string;
   isEditable: boolean;
   isConfirmed: boolean;
+  isComputed?: boolean;
+  isManualOverride?: boolean;
   note: string | null;
-  onSave: (newValue: string) => void;
+  status?: CellStatus;
+  audit?: CellAudit;
+  citation?: Citation | null;
+  onSave: (newDisplay: string, newAmount: number | null) => void;
+  onStatusChange?: (status: CellStatus) => void;
+  onClearOverride?: () => void;
+  onAuditClick?: () => void;
 }
 
 export default function EditableCell({
   value,
   isEditable,
   isConfirmed,
+  isComputed,
+  isManualOverride,
   note,
+  status,
+  audit,
+  citation,
   onSave,
+  onStatusChange,
+  onClearOverride,
+  onAuditClick,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -31,8 +65,19 @@ export default function EditableCell({
   const handleSave = () => {
     setEditing(false);
     if (editValue !== value) {
-      onSave(editValue);
+      const cleaned = editValue.replace(/[$,]/g, '').replace(/\/yr$/i, '').trim();
+      const parsed = parseFloat(cleaned);
+      if (!isNaN(parsed)) {
+        onSave(editValue, parsed);
+      } else {
+        onSave(editValue, null);
+      }
     }
+  };
+
+  const handleBlur = (e: React.FocusEvent) => {
+    if (containerRef.current?.contains(e.relatedTarget as Node)) return;
+    handleSave();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -43,46 +88,166 @@ export default function EditableCell({
     }
   };
 
-  const bgColor = !isConfirmed
-    ? 'bg-yellow-50'
-    : value === 'Not included'
-      ? 'bg-slate-50'
-      : value === 'Included in bundle'
-        ? 'bg-blue-50'
-        : '';
+  const handleStatusSelect = (newStatus: CellStatus) => {
+    setEditing(false);
+    if (onStatusChange) {
+      onStatusChange(newStatus);
+    } else {
+      const displayMap: Record<CellStatus, string> = {
+        currency: value,
+        tbc: 'To be confirmed',
+        included: 'Included',
+        included_in_bundle: 'Included in bundle',
+        not_included: 'Not included',
+        na: 'N/A',
+        hidden: 'Hidden',
+      };
+      onSave(displayMap[newStatus], null);
+    }
+  };
 
-  if (editing && isEditable) {
+  const lowerValue = value.toLowerCase().trim();
+  const isIncluded = status
+    ? status === 'included' || status === 'included_in_bundle'
+    : lowerValue === 'included' || lowerValue === 'included in bundle';
+  const isNotIncluded = status
+    ? status === 'not_included' || status === 'na'
+    : lowerValue === 'not included' || lowerValue === 'n/a';
+  const isHidden = status ? status === 'hidden' : lowerValue === 'hidden';
+  const isUnconfirmed = !isConfirmed && !isHidden;
+  const isCurrency = /^-?\$[\d,]+/.test(value);
+
+  let cellBg = '';
+  let textClass = 'text-slate-900';
+
+  if (isHidden) {
+    cellBg = 'bg-slate-50';
+    textClass = 'text-slate-400 italic';
+  } else if (isIncluded) {
+    cellBg = '';
+    textClass = 'text-green-600';
+  } else if (isNotIncluded) {
+    cellBg = '';
+    textClass = 'text-red-500';
+  } else if (isUnconfirmed) {
+    cellBg = 'bg-yellow-50';
+    textClass = 'text-amber-700';
+  }
+
+  const canEdit = isEditable;
+
+  if (editing && canEdit) {
     return (
-      <td className="px-3 py-2 border border-slate-200">
+      <div ref={containerRef} className="px-2 py-1.5" onBlur={handleBlur}>
         <input
           ref={inputRef}
           type="text"
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
           onKeyDown={handleKeyDown}
-          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          placeholder="$0"
+          className="w-full px-2 py-1 border border-blue-400 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none mb-1"
         />
-      </td>
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) {
+              handleStatusSelect(e.target.value as CellStatus);
+            }
+          }}
+          className="w-full px-2 py-1 border border-slate-300 rounded text-xs text-slate-500 bg-white cursor-pointer"
+        >
+          <option value="" disabled>Or set status...</option>
+          {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      </div>
     );
   }
 
   return (
-    <td
-      className={`px-3 py-2 border border-slate-200 text-sm ${bgColor} ${
-        isEditable ? 'cursor-pointer hover:bg-blue-50/50' : ''
-      }`}
-      onClick={() => isEditable && setEditing(true)}
+    <div
+      className={`px-3 py-2.5 text-sm text-center ${cellBg} ${
+        canEdit ? 'cursor-pointer hover:bg-blue-50/50' : ''
+      } ${isComputed && !isManualOverride ? 'bg-slate-50/50' : ''} ${isManualOverride ? 'bg-amber-50/30' : ''} group/cell relative`}
+      onClick={() => canEdit && setEditing(true)}
       title={note || undefined}
     >
-      <div className="flex items-center gap-1">
-        <span className={!isConfirmed ? 'text-amber-700' : 'text-slate-900'}>{value}</span>
-        {note && (
-          <span className="text-xs text-amber-500 ml-1" title={note}>
-            *
+      <div className="flex items-center justify-center gap-1.5">
+        {isIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : isNotIncluded ? (
+          <>
+            <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            <span className={textClass}>{value}</span>
+          </>
+        ) : (
+          <>
+            <span className={`${textClass} ${isCurrency ? 'font-medium' : ''}`}>{value}</span>
+            {isComputed && isManualOverride && (
+              <span className="inline-flex items-center gap-0.5">
+                <span title="Manually overridden">
+                  <svg className="w-3 h-3 text-amber-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+                  </svg>
+                </span>
+                {onClearOverride && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onClearOverride(); }}
+                    className="text-amber-400 hover:text-amber-600 transition"
+                    title="Reset to auto-calculated value"
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" />
+                    </svg>
+                  </button>
+                )}
+              </span>
+            )}
+            {isComputed && !isManualOverride && (
+              <span title="Auto-calculated">
+                <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25v-.008zm2.25-4.5h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm0 2.25h.008v.008H10.5v-.008zm2.25-6.75h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm0 2.25h.008v.008H12.75v-.008zm2.25-4.5h.008v.008H15v-.008zm0 2.25h.008v.008H15v-.008zm3.75-12v16.5a2.25 2.25 0 01-2.25 2.25H5.25a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0020.25 4.5H3.75A2.25 2.25 0 001.5 6.75m19.5 0v1.5" />
+                </svg>
+              </span>
+            )}
+            {note && !isComputed && (
+              <span className="text-xs text-amber-500" title={note}>
+                *
+              </span>
+            )}
+          </>
+        )}
+        {audit && (audit.sources.length > 0 || audit.override || audit.formula) && onAuditClick && (
+          <span className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); onAuditClick(); }}
+              onMouseEnter={() => {
+                tooltipTimer.current = setTimeout(() => setShowTooltip(true), 200);
+              }}
+              onMouseLeave={() => {
+                if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+                setShowTooltip(false);
+              }}
+              className="opacity-0 group-hover/cell:opacity-100 ml-0.5 text-slate-400 hover:text-outsail-blue-dark transition"
+              title=""
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+            </button>
+            {showTooltip && <CellAuditTooltip audit={audit} citation={citation} />}
           </span>
         )}
       </div>
-    </td>
+    </div>
   );
 }

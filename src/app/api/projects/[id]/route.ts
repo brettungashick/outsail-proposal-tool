@@ -1,55 +1,100 @@
-import { getServerSession } from 'next-auth';
 import { NextRequest, NextResponse } from 'next/server';
-import { authOptions } from '@/lib/auth';
+import { projectWhereOwnerOrAdmin } from '@/lib/auth';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { validateBody, projectUpdateSchema } from '@/lib/schemas';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
-  const userRole = (session.user as { role?: string }).role;
+  const userId = user.id;
+  const userRole = user.role;
 
-  // Allow any authenticated advisor to read any project (team access)
-  const project = await prisma.project.findFirst({
-    where: { id: params.id },
-    include: {
-      advisor: { select: { id: true, name: true, email: true } },
-      documents: { orderBy: { uploadedAt: 'desc' } },
-      analyses: { orderBy: { version: 'desc' }, take: 1 },
-      shareLinks: { orderBy: { createdAt: 'desc' } },
-    },
-  });
+  try {
+    // Try full query including shareLinks
+    const project = await prisma.project.findFirst({
+      where: { id: params.id },
+      include: {
+        advisor: { select: { id: true, name: true, email: true } },
+        documents: {
+          orderBy: { uploadedAt: 'desc' },
+          select: {
+            id: true, projectId: true, vendorName: true, fileName: true,
+            filePath: true, fileType: true, documentType: true,
+            quoteVersion: true, isActive: true, uploadedAt: true,
+          },
+        },
+        analyses: { orderBy: { version: 'desc' }, take: 1 },
+        shareLinks: { orderBy: { createdAt: 'desc' } },
+      },
+    });
 
-  if (!project) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const isOwner = project.advisorId === userId;
+    const isAdmin = userRole === 'admin';
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ ...project, isOwner, isAdmin });
+  } catch (err) {
+    // Fallback: shareLinks columns may not exist yet (run GET /api/seed to migrate)
+    console.error('Project query failed, retrying without shareLinks:', err);
+    const project = await prisma.project.findFirst({
+      where: { id: params.id },
+      include: {
+        advisor: { select: { id: true, name: true, email: true } },
+        documents: {
+          orderBy: { uploadedAt: 'desc' },
+          select: {
+            id: true, projectId: true, vendorName: true, fileName: true,
+            filePath: true, fileType: true, documentType: true,
+            quoteVersion: true, isActive: true, uploadedAt: true,
+          },
+        },
+        analyses: { orderBy: { version: 'desc' }, take: 1 },
+      },
+    });
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    const isOwner = project.advisorId === userId;
+    const isAdmin = userRole === 'admin';
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ ...project, shareLinks: [], isOwner, isAdmin });
   }
-
-  // Include ownership info for the client
-  const isOwner = project.advisorId === userId;
-  const isAdmin = userRole === 'admin';
-
-  return NextResponse.json({ ...project, isOwner, isAdmin });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const userId = user.id;
+  const userRole = user.role;
   const body = await req.json();
+  const validated = validateBody(projectUpdateSchema, body);
+  if (!validated.success) return validated.response;
 
   const project = await prisma.project.updateMany({
-    where: { id: params.id, advisorId: userId },
+    where: projectWhereOwnerOrAdmin(params.id, userId, userRole),
     data: {
-      name: body.name,
-      clientName: body.clientName,
-      clientEmail: body.clientEmail,
-      status: body.status,
+      name: validated.data.name,
+      clientName: validated.data.clientName,
+      clientEmail: validated.data.clientEmail,
+      status: validated.data.status,
     },
   });
 
@@ -61,19 +106,25 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
+  const user = await getSessionUser();
+  if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const userId = (session.user as { id: string }).id;
+  const userId = user.id;
+  const userRole = user.role;
 
   const project = await prisma.project.findFirst({
-    where: { id: params.id, advisorId: userId },
+    where: projectWhereOwnerOrAdmin(params.id, userId, userRole),
   });
 
   if (!project) {
     return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  }
+
+  // Only the owner or an admin can delete
+  if (project.advisorId !== userId && userRole !== 'admin') {
+    return NextResponse.json({ error: 'Only the project owner or an admin can delete this project' }, { status: 403 });
   }
 
   await prisma.project.delete({ where: { id: params.id } });

@@ -9,13 +9,17 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         String   @default("advisor")
-  createdAt    DateTime @default(now())
-  projects     Project[]
+  id                   String    @id @default(cuid())
+  email                String    @unique
+  passwordHash         String
+  name                 String
+  role                 String    @default("advisor")
+  inviteToken          String?   @unique
+  inviteStatus         String    @default("active") // pending | active
+  passwordResetToken   String?   @unique
+  passwordResetExpires DateTime?
+  createdAt            DateTime  @default(now())
+  projects             Project[]
 }
 
 model Project {
@@ -34,19 +38,22 @@ model Project {
 }
 
 model Document {
-  id           String   @id @default(cuid())
-  projectId    String
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  vendorName   String
-  fileName     String
-  filePath     String
-  fileType     String
-  rawText      String?
-  parsedData   String?
-  documentType String   @default("initial_quote")
-  quoteVersion Int      @default(1)
-  isActive     Boolean  @default(true)
-  uploadedAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  vendorName      String
+  fileName        String
+  filePath        String
+  fileType        String
+  fileSize        Int?     // bytes
+  rawText         String?
+  parsedData      String?
+  documentType    String   @default("initial_quote")
+  quoteVersion    Int      @default(1)
+  isActive        Boolean  @default(true)
+  ingestionStatus String   @default("uploaded") // uploaded | parsing | parsed | failed
+  ingestionError  String?
+  uploadedAt      DateTime @default(now())
 }
 
 model Analysis {
@@ -54,15 +61,22 @@ model Analysis {
   projectId            String
   project              Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   version              Int            @default(1)
+  status               String         @default("complete") // draft | clarifying | finalizing | complete | failed
   comparisonData       String
   standardizationNotes String?
   vendorNotes          String?
   nextSteps            String?
   citations            String?
   discountToggles      String?
+  hiddenRows           String?
+  parsedProposals      String?        // JSON: stored parsed proposals for finalization
+  clarifyingQuestions  String?        // JSON: AI-generated questions
+  advisorAnswers       String?        // JSON: advisor responses to questions
+  analysisProgress     String?        // JSON: progress tracking for async processing
   createdBy            String
   createdAt            DateTime       @default(now())
   edits                AnalysisEdit[]
+  learningEvents       LearningEvent[]
 }
 
 model AnalysisEdit {
@@ -77,13 +91,15 @@ model AnalysisEdit {
 }
 
 model ShareLink {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  email     String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  projectId     String
+  project       Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  token         String   @unique
+  email         String
+  allowedDomain String   @default("")
+  accessMode    String   @default("domain") // domain | public
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
 }
 
 model Vendor {
@@ -93,4 +109,56 @@ model Vendor {
   accentColor String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model AppSettings {
+  id         String  @id @default("app")
+  logoUrl    String?
+  faviconUrl String?
+}
+
+model LearningEvent {
+  id               String   @id @default(cuid())
+  analysisId       String
+  analysis         Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  projectId        String
+  vendorName       String
+  vendorKey        String?  // Stable vendor identifier (slug)
+  rowId            String
+  colId            String?  // Stable column identifier
+  cellId           String?  // Derived: ${analysisId}:${vendorKey}:${rowId}:${colId}
+  sectionName      String
+  vendorIndex      Int
+  editType         String   // value_change | status_change | label_change
+  oldDisplay       String
+  oldAmount        Float?
+  oldStatus        String?
+  newDisplay       String
+  newAmount        Float?
+  newStatus        String?
+  rowLabel         String
+  reasonTag        String?  // misclassified | wrong_unit | discount | bundled | other
+  promotedToRuleId String?
+  userId           String
+  createdAt        DateTime @default(now())
+}
+
+model VendorPlaybookRule {
+  id                 String   @id @default(cuid())
+  vendorName         String   // Vendor.name or "*" for global
+  vendorKey          String?  // Stable vendor slug for matching
+  name               String
+  conditionType      String   // contains | regex
+  conditionValue     String
+  conditionField     String   // label | section | display
+  actionType         String   // set_status | add_note (v1)
+  actionValue        String   // JSON string
+  examples           String?  // JSON array
+  confidence         String   @default("sure") // sure | maybe
+  enabled            Boolean  @default(true)
+  version            Int      @default(1)
+  createdBy          String
+  createdFromEventId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }

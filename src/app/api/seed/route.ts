@@ -2,6 +2,13 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 
+/**
+ * Seed route is disabled in production. Use the CLI seeding mechanism instead:
+ *   npm run db:seed
+ *
+ * This route always returns 404 in production, regardless of ALLOW_SEED.
+ * In non-production, it requires ALLOW_SEED=true AND an authenticated admin session.
+ */
 export async function GET() {
   try {
     // Create tables if they don't exist
@@ -58,6 +65,17 @@ export async function GET() {
       }
     };
 
+    await addColumnSafe('User', 'inviteToken', 'TEXT');
+    await addColumnSafe('User', 'inviteStatus', "TEXT NOT NULL DEFAULT 'active'");
+    await addColumnSafe('User', 'passwordResetToken', 'TEXT');
+    await addColumnSafe('User', 'passwordResetExpires', 'DATETIME');
+    try {
+      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_inviteToken_key" ON "User"("inviteToken")`);
+    } catch { /* ignore */ }
+    try {
+      await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "User_passwordResetToken_key" ON "User"("passwordResetToken")`);
+    } catch { /* ignore */ }
+
     await addColumnSafe('Document', 'documentType', "TEXT NOT NULL DEFAULT 'initial_quote'");
     await addColumnSafe('Document', 'quoteVersion', 'INTEGER NOT NULL DEFAULT 1');
     await addColumnSafe('Document', 'isActive', 'INTEGER NOT NULL DEFAULT 1');
@@ -80,6 +98,11 @@ export async function GET() {
     `);
 
     await addColumnSafe('Analysis', 'discountToggles', 'TEXT');
+    await addColumnSafe('Analysis', 'hiddenRows', 'TEXT');
+    await addColumnSafe('Analysis', 'status', "TEXT NOT NULL DEFAULT 'complete'");
+    await addColumnSafe('Analysis', 'parsedProposals', 'TEXT');
+    await addColumnSafe('Analysis', 'clarifyingQuestions', 'TEXT');
+    await addColumnSafe('Analysis', 'advisorAnswers', 'TEXT');
 
     await prisma.$executeRawUnsafe(`
       CREATE TABLE IF NOT EXISTS "AnalysisEdit" (
@@ -119,6 +142,15 @@ export async function GET() {
       )
     `);
     await prisma.$executeRawUnsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "Vendor_name_key" ON "Vendor"("name")`);
+
+    // AppSettings table
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS "AppSettings" (
+        "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'app',
+        "logoUrl" TEXT,
+        "faviconUrl" TEXT
+      )
+    `);
 
     // --- Seed Users ---
     const passwordHash = await bcrypt.hash('outsail2024', 12);
