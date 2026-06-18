@@ -91,7 +91,7 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
 }`;
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-8',
     max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -360,7 +360,7 @@ For Totals:
 If any component of a total is "To be confirmed", mark the total as "To be confirmed" too and note which components are missing.`;
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-8',
     max_tokens: 16384,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -438,7 +438,7 @@ Return ONLY valid JSON (no markdown, no explanation) as an array:
 ]`;
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-8',
     max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
   });
