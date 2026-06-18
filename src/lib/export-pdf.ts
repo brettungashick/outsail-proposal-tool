@@ -2,6 +2,15 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ComparisonTable, Citation } from '@/types';
 
+// OutSail brand palette (see docs/design-system.md) — blue + neutral only.
+const HARBOR: [number, number, number] = [30, 58, 107]; // #1E3A6B
+const OSBLUE: [number, number, number] = [66, 119, 199]; // #4277C7
+const DEEP_NAVY: [number, number, number] = [15, 23, 42]; // #0F172A
+const SLATE: [number, number, number] = [51, 65, 85]; // #334155
+const COOL_GRAY: [number, number, number] = [100, 116, 139]; // #64748B
+const OFF_WHITE: [number, number, number] = [244, 247, 251]; // #F4F7FB
+const WHITE: [number, number, number] = [255, 255, 255];
+
 export function generatePdfBuffer(
   comparisonData: ComparisonTable,
   standardizationNotes: string[],
@@ -12,30 +21,29 @@ export function generatePdfBuffer(
 ): Buffer {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-  // Header
+  // Header — two-tone OutSail wordmark (Deep Harbor "Out" + OutSail Blue "Sail")
+  doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
-  doc.setTextColor(30, 58, 138); // blue-900
-  doc.text('OutSail', 14, 15);
+  doc.setTextColor(...HARBOR);
+  doc.text('Out', 14, 15);
+  const outWidth = doc.getTextWidth('Out');
+  doc.setTextColor(...OSBLUE);
+  doc.text('Sail', 14 + outWidth, 15);
+
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(14);
-  doc.setTextColor(15, 23, 42); // slate-900
+  doc.setTextColor(...DEEP_NAVY);
   doc.text(`Proposal Comparison — ${projectName}`, 14, 24);
   doc.setFontSize(8);
-  doc.setTextColor(100, 116, 139); // slate-500
+  doc.setTextColor(...COOL_GRAY);
   doc.text(`Generated ${new Date().toLocaleDateString()}`, 14, 30);
 
   let yPos = 36;
 
-  // Comparison table per section
-  const sectionColors: Record<string, [number, number, number]> = {
-    'Software Fees (Recurring)': [37, 99, 235],
-    'Implementation Fees (One-Time)': [5, 150, 105],
-    'Service Fees (Recurring)': [147, 51, 234],
-    Discounts: [217, 119, 6],
-    Totals: [30, 41, 59],
-  };
-
   for (const section of comparisonData.sections) {
-    const bgColor = sectionColors[section.name] || [71, 85, 105];
+    // Stay in the brand's single blue family: Deep Harbor banners, OutSail Blue
+    // for Totals to set it apart. No greens/teals/purples/ambers.
+    const bgColor: [number, number, number] = section.name === 'Totals' ? OSBLUE : HARBOR;
 
     const headers = ['Category', ...comparisonData.vendors];
     const body = section.rows.map((row) => [
@@ -45,11 +53,11 @@ export function generatePdfBuffer(
 
     autoTable(doc, {
       startY: yPos,
-      head: [[{ content: section.name, colSpan: headers.length, styles: { fillColor: bgColor, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 } }], headers],
+      head: [[{ content: section.name, colSpan: headers.length, styles: { fillColor: bgColor, textColor: WHITE, fontStyle: 'bold', fontSize: 9 } }], headers],
       body,
       theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 2 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [30, 41, 59], fontStyle: 'bold', fontSize: 7 },
+      styles: { fontSize: 7, cellPadding: 2, textColor: SLATE },
+      headStyles: { fillColor: OFF_WHITE, textColor: HARBOR, fontStyle: 'bold', fontSize: 7 },
       columnStyles: { 0: { cellWidth: 55 } },
       margin: { left: 14, right: 14 },
     });
@@ -67,11 +75,11 @@ export function generatePdfBuffer(
   yPos = 14;
 
   doc.setFontSize(12);
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(...DEEP_NAVY);
   doc.text('Standardization Notes', 14, yPos);
   yPos += 6;
   doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
+  doc.setTextColor(...SLATE);
   for (const note of standardizationNotes) {
     const lines = doc.splitTextToSize(`• ${note}`, 260);
     doc.text(lines, 14, yPos);
@@ -84,18 +92,18 @@ export function generatePdfBuffer(
 
   yPos += 6;
   doc.setFontSize(12);
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(...DEEP_NAVY);
   doc.text('Vendor Notes', 14, yPos);
   yPos += 6;
   doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
+  doc.setTextColor(...SLATE);
   for (const [vendor, notes] of Object.entries(vendorNotes)) {
     doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
+    doc.setTextColor(...DEEP_NAVY);
     doc.text(vendor, 14, yPos);
     yPos += 4;
     doc.setFontSize(8);
-    doc.setTextColor(71, 85, 105);
+    doc.setTextColor(...SLATE);
     for (const note of notes) {
       const lines = doc.splitTextToSize(`• ${note}`, 260);
       doc.text(lines, 18, yPos);
@@ -110,11 +118,11 @@ export function generatePdfBuffer(
 
   yPos += 6;
   doc.setFontSize(12);
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(...DEEP_NAVY);
   doc.text('Next Steps', 14, yPos);
   yPos += 6;
   doc.setFontSize(8);
-  doc.setTextColor(71, 85, 105);
+  doc.setTextColor(...SLATE);
   for (const step of nextSteps) {
     const lines = doc.splitTextToSize(`• ${step}`, 260);
     doc.text(lines, 14, yPos);
@@ -130,7 +138,7 @@ export function generatePdfBuffer(
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(7);
-    doc.setTextColor(148, 163, 184);
+    doc.setTextColor(...COOL_GRAY);
     doc.text('Generated by OutSail | Confidential', 14, 200);
     doc.text(`Page ${i} of ${pageCount}`, 270, 200);
   }
