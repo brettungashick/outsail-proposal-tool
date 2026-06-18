@@ -47,9 +47,9 @@ export default function AppLogo({ width = 140, height = 36, className }: AppLogo
   return (
     <span
       className={className}
-      style={{ fontSize: height * 0.6, fontWeight: 700, color: '#082f69', lineHeight: 1 }}
+      style={{ fontSize: height * 0.6, fontWeight: 700, color: '#1E3A6B', lineHeight: 1 }}
     >
-      Out<span style={{ color: '#0052cc' }}>Sail</span>
+      Out<span style={{ color: '#4277C7' }}>Sail</span>
     </span>
   );
 }

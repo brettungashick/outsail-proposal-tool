@@ -3,18 +3,18 @@
 import { useEffect, useState } from 'react';
 
 const MESSAGES = [
-  { text: 'Reading the fine print so you don\'t have to...', icon: '📋' },
-  { text: 'Comparing apples to slightly different apples...', icon: '🍎' },
-  { text: 'Translating vendor-speak into plain English...', icon: '🔤' },
-  { text: 'Hunting for hidden fees like a truffle pig...', icon: '🔍' },
-  { text: 'Standardizing pricing across vendors... fun stuff.', icon: '📊' },
-  { text: 'Making sure nobody\'s "unlimited" has a limit...', icon: '♾️' },
-  { text: 'Cross-referencing implementation timelines...', icon: '📅' },
-  { text: 'Decoding acronyms even vendors forgot about...', icon: '🧩' },
-  { text: 'Flagging the asterisks behind the asterisks...', icon: '⚠️' },
-  { text: 'Almost there — just dotting the i\'s and crossing the t\'s...', icon: '✍️' },
-  { text: 'Crunching numbers that would make a spreadsheet blush...', icon: '🔢' },
-  { text: 'Giving each proposal a fair, unbiased reading...', icon: '⚖️' },
+  'Reading the fine print so you don\'t have to...',
+  'Comparing apples to slightly different apples...',
+  'Translating vendor-speak into plain English...',
+  'Hunting for hidden fees...',
+  'Standardizing pricing across vendors...',
+  'Making sure nobody\'s "unlimited" has a limit...',
+  'Cross-referencing implementation timelines...',
+  'Decoding acronyms even vendors forgot about...',
+  'Flagging the asterisks behind the asterisks...',
+  'Almost there — dotting the i\'s and crossing the t\'s...',
+  'Normalizing recurring fees to annual totals...',
+  'Giving each proposal a fair, unbiased reading...',
 ];
 
 export default function AnalysisLoadingOverlay({ statusMessage }: { statusMessage?: string }) {
@@ -70,7 +70,7 @@ export default function AnalysisLoadingOverlay({ statusMessage }: { statusMessag
         {/* Progress bar */}
         <div className="w-full bg-slate-100 rounded-full h-2 mb-8 overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-outsail-blue to-outsail-blue-dark rounded-full transition-all duration-500 ease-out"
+            className="h-full bg-outsail-blue transition-all duration-500 ease-out"
             style={{ width: `${progress}%` }}
           />
         </div>
@@ -88,10 +88,7 @@ export default function AnalysisLoadingOverlay({ statusMessage }: { statusMessag
           className="h-12 flex items-center justify-center transition-opacity duration-300"
           style={{ opacity: fade ? 1 : 0 }}
         >
-          <p className="text-sm text-slate-600">
-            <span className="mr-2">{current.icon}</span>
-            {current.text}
-          </p>
+          <p className="text-sm text-slate-600">{current}</p>
         </div>
       </div>
     </div>
