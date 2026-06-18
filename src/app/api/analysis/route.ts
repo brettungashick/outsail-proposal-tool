@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { projectWhereOwnerOrAdmin } from '@/lib/auth';
-import { getSessionUser, getAppBaseUrl } from '@/lib/access';
+import { getSessionUser } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { isApiKeyConfigured } from '@/lib/claude';
 import { validateBody, analysisCreateSchema } from '@/lib/schemas';
+
+// Allow up to 5 minutes — parsing several vendor proposals requires multiple
+// Claude calls. Without this the function is killed at the default timeout and
+// the analysis is left stuck in "draft" (the loading screen spins forever).
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   const user = await getSessionUser();
@@ -75,83 +80,49 @@ export async function POST(req: NextRequest) {
     data: { status: 'analyzing' },
   });
 
-  // Fire-and-forget: trigger background processing
-  const baseUrl = getAppBaseUrl(req.headers);
-  const processSecret = process.env.ANALYSIS_SECRET;
-  if (processSecret) {
-    fetch(`${baseUrl}/api/analysis/${analysis.id}/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${processSecret}`,
-      },
-      body: JSON.stringify({ mode: 'parse' }),
-    }).catch((err) => console.error('Failed to trigger analysis processing:', err));
-  } else {
-    // Fallback: run synchronously (for dev without ANALYSIS_SECRET)
-    console.warn('ANALYSIS_SECRET not set — running analysis synchronously.');
-    const { parseProposal, generateClarifyingQuestions } = await import('@/lib/claude');
-    try {
-      const vendorDocs: Record<string, typeof activeDocs> = {};
-      for (const doc of activeDocs) {
-        if (!vendorDocs[doc.vendorName]) vendorDocs[doc.vendorName] = [];
-        vendorDocs[doc.vendorName].push(doc);
-      }
+  // Run the analysis inline within this request. A serverless "fire-and-forget"
+  // background fetch is unreliable — the function can be frozen before the
+  // request is even dispatched — so we process here and let maxDuration (above)
+  // give us the headroom. The client awaits this response and polls for progress.
+  const { parseProposal, generateClarifyingQuestions } = await import('@/lib/claude');
 
-      const parsedProposals = [];
-      for (const [vendor, docs] of Object.entries(vendorDocs)) {
-        try {
-          const hasValidText = docs.some(
-            (d) => d.rawText && d.rawText.trim().length > 50 && d.rawText !== 'Error extracting text from file'
-          );
+  const updateProgress = (progress: object) =>
+    prisma.analysis.update({
+      where: { id: analysis.id },
+      data: { analysisProgress: JSON.stringify(progress) },
+    });
 
-          if (!hasValidText) {
-            console.error(`Vendor ${vendor}: All documents have empty or invalid extracted text`);
-            parsedProposals.push({
-              vendorName: vendor,
-              documentId: docs[0].id,
-              documentName: docs[0].fileName,
-              headcount: null,
-              contractTermMonths: null,
-              modules: [],
-              implementationItems: [],
-              serviceItems: [],
-              discounts: [],
-              notableTerms: [],
-              unknowns: ['Document text extraction failed. All values must be entered manually.'],
-            });
-            continue;
-          }
+  try {
+    const vendorDocs: Record<string, typeof activeDocs> = {};
+    for (const doc of activeDocs) {
+      if (!vendorDocs[doc.vendorName]) vendorDocs[doc.vendorName] = [];
+      vendorDocs[doc.vendorName].push(doc);
+    }
 
-          const allParsed = docs.every((d) => d.parsedData);
-          if (allParsed && docs.length === 1) {
-            const doc = docs[0];
-            parsedProposals.push({
-              ...JSON.parse(doc.parsedData!),
-              documentId: doc.id,
-              documentName: doc.fileName,
-            });
-          } else {
-            const mergedText = docs
-              .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
-              .join('\n\n');
-            const primaryDoc = docs[0];
-            const parsed = await parseProposal(
-              mergedText,
-              vendor,
-              primaryDoc.id,
-              docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
-            );
-            for (const doc of docs) {
-              await prisma.document.update({
-                where: { id: doc.id },
-                data: { parsedData: JSON.stringify(parsed) },
-              });
-            }
-            parsedProposals.push(parsed);
-          }
-        } catch (vendorError) {
-          console.error(`Failed to parse vendor ${vendor}:`, vendorError);
+    const totalVendors = Object.keys(vendorDocs).length;
+    let vendorsParsed = 0;
+    await updateProgress({
+      stage: 'parsing',
+      vendorsParsed: 0,
+      totalVendors,
+      message: 'Starting proposal parsing...',
+    });
+
+    const parsedProposals = [];
+    for (const [vendor, docs] of Object.entries(vendorDocs)) {
+      await updateProgress({
+        stage: 'parsing',
+        vendorsParsed,
+        totalVendors,
+        message: `Parsing ${vendor} proposal...`,
+      });
+      try {
+        const hasValidText = docs.some(
+          (d) => d.rawText && d.rawText.trim().length > 50 && d.rawText !== 'Error extracting text from file'
+        );
+
+        if (!hasValidText) {
+          console.error(`Vendor ${vendor}: All documents have empty or invalid extracted text`);
           parsedProposals.push({
             vendorName: vendor,
             documentId: docs[0].id,
@@ -163,51 +134,106 @@ export async function POST(req: NextRequest) {
             serviceItems: [],
             discounts: [],
             notableTerms: [],
-            unknowns: [
-              `Failed to parse proposal: ${vendorError instanceof Error ? vendorError.message : 'Unknown error'}`,
-            ],
+            unknowns: ['Document text extraction failed. All values must be entered manually.'],
           });
+          vendorsParsed++;
+          continue;
         }
+
+        const allParsed = docs.every((d) => d.parsedData);
+        if (allParsed && docs.length === 1) {
+          const doc = docs[0];
+          parsedProposals.push({
+            ...JSON.parse(doc.parsedData!),
+            documentId: doc.id,
+            documentName: doc.fileName,
+          });
+        } else {
+          const mergedText = docs
+            .map((d) => `--- ${d.fileName} (${d.documentType || 'initial_quote'}) ---\n${d.rawText || ''}`)
+            .join('\n\n');
+          const primaryDoc = docs[0];
+          const parsed = await parseProposal(
+            mergedText,
+            vendor,
+            primaryDoc.id,
+            docs.length === 1 ? primaryDoc.fileName : `${vendor} (${docs.length} files)`
+          );
+          for (const doc of docs) {
+            await prisma.document.update({
+              where: { id: doc.id },
+              data: { parsedData: JSON.stringify(parsed) },
+            });
+          }
+          parsedProposals.push(parsed);
+        }
+      } catch (vendorError) {
+        console.error(`Failed to parse vendor ${vendor}:`, vendorError);
+        parsedProposals.push({
+          vendorName: vendor,
+          documentId: docs[0].id,
+          documentName: docs[0].fileName,
+          headcount: null,
+          contractTermMonths: null,
+          modules: [],
+          implementationItems: [],
+          serviceItems: [],
+          discounts: [],
+          notableTerms: [],
+          unknowns: [
+            `Failed to parse proposal: ${vendorError instanceof Error ? vendorError.message : 'Unknown error'}`,
+          ],
+        });
       }
-
-      if (parsedProposals.length === 0) {
-        throw new Error('All vendor proposals failed to parse.');
-      }
-
-      const questions = await generateClarifyingQuestions(parsedProposals);
-
-      await prisma.analysis.update({
-        where: { id: analysis.id },
-        data: {
-          status: 'clarifying',
-          parsedProposals: JSON.stringify(parsedProposals),
-          clarifyingQuestions: JSON.stringify(questions),
-          analysisProgress: JSON.stringify({ stage: 'complete', message: 'Ready for review' }),
-        },
-      });
-
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { status: 'clarifying' },
-      });
-    } catch (error: unknown) {
-      console.error('Sync analysis error:', error);
-      await prisma.analysis.update({
-        where: { id: analysis.id },
-        data: {
-          status: 'failed',
-          analysisProgress: JSON.stringify({
-            stage: 'error',
-            message: error instanceof Error ? error.message : 'Analysis failed',
-          }),
-        },
-      });
-      await prisma.project.update({
-        where: { id: projectId },
-        data: { status: 'draft' },
-      });
+      vendorsParsed++;
     }
-  }
 
-  return NextResponse.json(analysis, { status: 202 });
+    if (parsedProposals.length === 0) {
+      throw new Error('All vendor proposals failed to parse.');
+    }
+
+    await updateProgress({
+      stage: 'questions',
+      vendorsParsed: totalVendors,
+      totalVendors,
+      message: 'Generating clarifying questions...',
+    });
+    const questions = await generateClarifyingQuestions(parsedProposals);
+
+    await prisma.analysis.update({
+      where: { id: analysis.id },
+      data: {
+        status: 'clarifying',
+        parsedProposals: JSON.stringify(parsedProposals),
+        clarifyingQuestions: JSON.stringify(questions),
+        analysisProgress: JSON.stringify({ stage: 'complete', message: 'Ready for review' }),
+      },
+    });
+
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { status: 'clarifying' },
+    });
+
+    return NextResponse.json({ ...analysis, status: 'clarifying' }, { status: 200 });
+  } catch (error: unknown) {
+    console.error('Analysis error:', error);
+    await prisma.analysis.update({
+      where: { id: analysis.id },
+      data: {
+        status: 'failed',
+        analysisProgress: JSON.stringify({
+          stage: 'error',
+          message: error instanceof Error ? error.message : 'Analysis failed',
+        }),
+      },
+    });
+    await prisma.project.update({
+      where: { id: projectId },
+      data: { status: 'draft' },
+    });
+
+    const message = error instanceof Error ? error.message : 'Analysis failed';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

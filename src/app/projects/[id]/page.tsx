@@ -74,6 +74,7 @@ export default function ProjectPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [progressMessage, setProgressMessage] = useState('');
+  const [stuck, setStuck] = useState(false);
 
   useEffect(() => {
     if (authStatus === 'unauthenticated') router.push('/login');
@@ -110,6 +111,13 @@ export default function ProjectPage() {
     const latestAnalysis = project.analyses[0];
     if (!latestAnalysis) return;
 
+    // Watchdog: if the server reports no new progress for this long, the
+    // processing function has almost certainly died mid-run. Rather than spin
+    // forever, surface an error so the advisor can retry.
+    const STUCK_MS = 120000;
+    let lastMessage = '';
+    let lastChangeAt = Date.now();
+
     const pollProgress = async () => {
       try {
         const res = await fetch(`/api/analysis/${latestAnalysis.id}`);
@@ -119,7 +127,12 @@ export default function ProjectPage() {
         if (data.analysisProgress) {
           try {
             const progress: AnalysisProgress = JSON.parse(data.analysisProgress);
-            setProgressMessage(progress.message || '');
+            const message = progress.message || '';
+            setProgressMessage(message);
+            if (message !== lastMessage) {
+              lastMessage = message;
+              lastChangeAt = Date.now();
+            }
 
             if (progress.stage === 'error') {
               setAnalyzeError(progress.message || 'Analysis failed');
@@ -134,16 +147,26 @@ export default function ProjectPage() {
           setAnalyzing(false);
           fetchProject();
           router.push(`/projects/${projectId}/analysis`);
+          return;
         } else if (data.status === 'clarifying') {
           setAnalyzing(false);
           fetchProject();
+          return;
         } else if (data.status === 'failed') {
           setAnalyzing(false);
           fetchProject();
+          return;
+        }
+
+        if (Date.now() - lastChangeAt > STUCK_MS) {
+          setStuck(true);
+          setAnalyzing(false);
+          setAnalyzeError('The analysis stalled and did not finish. Please try generating it again.');
         }
       } catch { /* network error, will retry */ }
     };
 
+    setStuck(false);
     setAnalyzing(true);
     const interval = setInterval(pollProgress, 3000);
     pollProgress();
@@ -167,6 +190,7 @@ export default function ProjectPage() {
   };
 
   const handleAnalyze = async () => {
+    setStuck(false);
     setAnalyzing(true);
     setAnalyzeError('');
     try {
@@ -179,18 +203,28 @@ export default function ProjectPage() {
         const data = await res.json();
         throw new Error(data.error || 'Analysis failed');
       }
-      // 202 returned — polling effect will pick up progress
+      // Processing runs inline server-side; the response resolves once it is
+      // ready for review. Refresh to pick up the new status.
       await fetchProject();
     } catch (err) {
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed');
       setAnalyzing(false);
+      // Reflect whatever state the server left things in (e.g. failed).
+      fetchProject();
     }
   };
 
-  const handleFinalized = () => {
-    // Refresh project data — polling will show the loading overlay
-    // and redirect to analysis page once complete
-    fetchProject();
+  const handleFinalized = async () => {
+    // Finalization runs inline server-side. Refresh and, if the comparison is
+    // ready, jump straight to the full analysis view.
+    const res = await fetch(`/api/projects/${projectId}`);
+    if (res.ok) {
+      const data = await res.json();
+      setProject(data);
+      if (data.status === 'complete') {
+        router.push(`/projects/${projectId}/analysis`);
+      }
+    }
   };
 
   const handleDeleteProject = async () => {
@@ -231,13 +265,16 @@ export default function ProjectPage() {
   const latestAnalysis = project.analyses[0] || null;
   const isClarifying = latestAnalysis?.status === 'clarifying';
   const isProcessing = latestAnalysis?.status === 'draft' || latestAnalysis?.status === 'finalizing';
+  // When the watchdog flags a stalled run, stop treating it as in-progress so
+  // the loading overlay clears and the advisor regains control to retry.
+  const blocked = isProcessing && !stuck;
   const isComplete = latestAnalysis?.status === 'complete';
   const isFailed = latestAnalysis?.status === 'failed';
   const canEdit = project.isOwner || project.isAdmin;
 
   return (
     <Sidebar>
-      {(analyzing || isProcessing) && <AnalysisLoadingOverlay statusMessage={progressMessage} />}
+      {(analyzing || blocked) && <AnalysisLoadingOverlay statusMessage={progressMessage} />}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-6">
@@ -266,7 +303,7 @@ export default function ProjectPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              {canEdit && project.documents.length >= 2 && !isClarifying && !isProcessing && (
+              {canEdit && project.documents.length >= 2 && !isClarifying && !blocked && (
                 <button
                   onClick={handleAnalyze}
                   disabled={analyzing}

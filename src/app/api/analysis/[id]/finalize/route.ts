@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSessionUser, getAppBaseUrl, requireAnalysisAccess } from '@/lib/access';
+import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
 import { generateComparison, isApiKeyConfigured } from '@/lib/claude';
 import { ParsedProposal } from '@/types';
 import { validateBody, analysisFinalizeSchema } from '@/lib/schemas';
+
+// Generating the comparison is a single large Claude call — give it headroom so
+// the function isn't killed mid-flight, which would leave the analysis stuck.
+export const maxDuration = 300;
 
 export async function POST(
   req: NextRequest,
@@ -64,63 +68,60 @@ export async function POST(
     data: { status: 'analyzing' },
   });
 
-  // Fire-and-forget: trigger background finalization
-  const baseUrl = getAppBaseUrl(req.headers);
-  const processSecret = process.env.ANALYSIS_SECRET;
-  if (processSecret) {
-    fetch(`${baseUrl}/api/analysis/${id}/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${processSecret}`,
+  // Generate the comparison inline. A serverless "fire-and-forget" background
+  // fetch is unreliable (the function can be frozen before the request is
+  // dispatched), so we run it here within maxDuration and let the client await.
+  try {
+    await prisma.analysis.update({
+      where: { id },
+      data: {
+        analysisProgress: JSON.stringify({ stage: 'generating', message: 'Generating comparison table...' }),
       },
-      body: JSON.stringify({ mode: 'finalize' }),
-    }).catch((err) => console.error('Failed to trigger finalization processing:', err));
-  } else {
-    // Fallback: run synchronously (for dev without ANALYSIS_SECRET)
-    console.warn('ANALYSIS_SECRET not set — running finalization synchronously.');
-    try {
-      const parsedProposals: ParsedProposal[] = JSON.parse(analysis.parsedProposals || '[]');
-      const advisorContext = formatAdvisorAnswers(answers, analysis.clarifyingQuestions);
-      const analysisResult = await generateComparison(parsedProposals, advisorContext);
+    });
 
-      await prisma.analysis.update({
-        where: { id },
-        data: {
-          status: 'complete',
-          comparisonData: JSON.stringify(analysisResult.comparisonTable),
-          standardizationNotes: JSON.stringify(analysisResult.standardizationNotes),
-          vendorNotes: JSON.stringify(analysisResult.vendorNotes),
-          nextSteps: JSON.stringify(analysisResult.nextSteps),
-          citations: JSON.stringify(analysisResult.citations),
-          analysisProgress: JSON.stringify({ stage: 'complete', message: 'Analysis complete' }),
-        },
-      });
+    const parsedProposals: ParsedProposal[] = JSON.parse(analysis.parsedProposals || '[]');
+    const advisorContext = formatAdvisorAnswers(answers, analysis.clarifyingQuestions);
+    const analysisResult = await generateComparison(parsedProposals, advisorContext);
 
-      await prisma.project.update({
-        where: { id: analysis.projectId },
-        data: { status: 'complete' },
-      });
-    } catch (error: unknown) {
-      console.error('Sync finalization error:', error);
-      await prisma.analysis.update({
-        where: { id },
-        data: {
-          status: 'clarifying',
-          analysisProgress: JSON.stringify({
-            stage: 'error',
-            message: error instanceof Error ? error.message : 'Finalization failed',
-          }),
-        },
-      });
-      await prisma.project.update({
-        where: { id: analysis.projectId },
-        data: { status: 'clarifying' },
-      });
-    }
+    await prisma.analysis.update({
+      where: { id },
+      data: {
+        status: 'complete',
+        comparisonData: JSON.stringify(analysisResult.comparisonTable),
+        standardizationNotes: JSON.stringify(analysisResult.standardizationNotes),
+        vendorNotes: JSON.stringify(analysisResult.vendorNotes),
+        nextSteps: JSON.stringify(analysisResult.nextSteps),
+        citations: JSON.stringify(analysisResult.citations),
+        analysisProgress: JSON.stringify({ stage: 'complete', message: 'Analysis complete' }),
+      },
+    });
+
+    await prisma.project.update({
+      where: { id: analysis.projectId },
+      data: { status: 'complete' },
+    });
+
+    return NextResponse.json({ id, status: 'complete' }, { status: 200 });
+  } catch (error: unknown) {
+    console.error('Finalization error:', error);
+    await prisma.analysis.update({
+      where: { id },
+      data: {
+        status: 'clarifying',
+        analysisProgress: JSON.stringify({
+          stage: 'error',
+          message: error instanceof Error ? error.message : 'Finalization failed',
+        }),
+      },
+    });
+    await prisma.project.update({
+      where: { id: analysis.projectId },
+      data: { status: 'clarifying' },
+    });
+
+    const message = error instanceof Error ? error.message : 'Finalization failed';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  return NextResponse.json({ id, status: 'finalizing' }, { status: 202 });
 }
 
 function formatAdvisorAnswers(
