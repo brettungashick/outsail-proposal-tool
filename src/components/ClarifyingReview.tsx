@@ -28,6 +28,10 @@ interface ClarifyingReviewProps {
   readOnly?: boolean;
 }
 
+// Answers longer than this are clipped server-side when the comparison prompt is
+// built (see the finalize route) — warn before the advisor loses part of a paste.
+const MAX_ANSWER_CHARS = 20000;
+
 const categoryLabels: Record<string, string> = {
   missing_data: 'Missing Data',
   ambiguity: 'Ambiguity',
@@ -329,12 +333,19 @@ export default function ClarifyingReview({
             {!readOnly && (
               <div>
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={answers[q.id] || ''}
                   onChange={(e) => handleAnswerChange(q.id, e.target.value)}
                   placeholder="Your answer or additional notes..."
-                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none resize-none"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-outsail-blue focus:border-outsail-blue outline-none resize-y"
                 />
+                {(answers[q.id]?.length || 0) > MAX_ANSWER_CHARS && (
+                  <p className="mt-1.5 text-xs text-amber-700">
+                    This answer is {(answers[q.id]?.length || 0).toLocaleString()} characters — only the
+                    first {MAX_ANSWER_CHARS.toLocaleString()} will be used. If you&apos;re pasting text from a
+                    document, upload it as a supplemental file above instead so the whole thing is analyzed.
+                  </p>
+                )}
                 {q.suggestedDefault && !answers[q.id]?.trim() && (
                   <button
                     onClick={() => handleUseDefault(q.id, q.suggestedDefault!)}

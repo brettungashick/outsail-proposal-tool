@@ -1,13 +1,91 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ParsedProposal, AnalysisResult, ClarifyingQuestion } from '@/types';
+import { extractJsonPayload, repairTruncatedJson } from '@/lib/json-recovery';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 });
 
+const MODEL = 'claude-opus-4-8';
+
 export function isApiKeyConfigured(): boolean {
   const key = process.env.ANTHROPIC_API_KEY;
   return !!key && key !== 'your-anthropic-api-key-here';
+}
+
+/**
+ * Run a single Claude request over a stream.
+ *
+ * Streaming matters here for two reasons: it lets us ask for large
+ * `max_tokens` without tripping the SDK's HTTP timeout, and it keeps the
+ * serverless function's connection alive during long generations. We only need
+ * the final message, so `finalMessage()` collects the stream for us.
+ */
+async function createMessage(params: {
+  maxTokens: number;
+  prompt: string;
+}): Promise<Anthropic.Message> {
+  const stream = anthropic.messages.stream({
+    model: MODEL,
+    max_tokens: params.maxTokens,
+    messages: [{ role: 'user', content: params.prompt }],
+  });
+  return stream.finalMessage();
+}
+
+function messageText(message: Anthropic.Message): string {
+  return message.content
+    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+}
+
+interface JsonParseResult<T> {
+  data: T;
+  /** True when the response was truncated and we recovered a partial payload. */
+  truncated: boolean;
+}
+
+function parseJsonResponse<T>(
+  message: Anthropic.Message,
+  label: string
+): JsonParseResult<T> {
+  const responseText = messageText(message);
+  const payload = extractJsonPayload(responseText);
+
+  try {
+    return { data: JSON.parse(payload) as T, truncated: false };
+  } catch (parseError) {
+    const hitCap = message.stop_reason === 'max_tokens';
+    console.error(
+      `[claude] ${label}: could not parse response. length=${responseText.length} ` +
+        `stop_reason=${message.stop_reason} error=${
+          parseError instanceof Error ? parseError.message : parseError
+        }`
+    );
+
+    const repaired = repairTruncatedJson(payload);
+    if (repaired) {
+      try {
+        const data = JSON.parse(repaired) as T;
+        console.warn(
+          `[claude] ${label}: recovered a partial payload from a truncated response ` +
+            `(${payload.length} → ${repaired.length} chars).`
+        );
+        return { data, truncated: true };
+      } catch {
+        // Fall through to the error below.
+      }
+    }
+
+    if (hitCap) {
+      throw new Error(
+        `${label}: the AI response was cut off before it could be read. ` +
+          `Try again, or reduce the amount of source text being analyzed.`
+      );
+    }
+    throw parseError;
+  }
 }
 
 export async function parseProposal(
@@ -90,25 +168,37 @@ Return ONLY valid JSON matching this exact schema (no markdown, no explanation):
   "unknowns": ["<anything unclear or potentially missing>"]
 }`;
 
-  const message = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // A detailed proposal easily produces more than 4k tokens of JSON — the old
+  // ceiling — and a truncated response is unparseable, which dropped the whole
+  // vendor from the analysis. Streaming lets us give it real headroom.
+  const message = await createMessage({ maxTokens: 32000, prompt });
 
-  const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
-
-  // Parse the JSON response, stripping any markdown code fences
-  let cleanText = responseText.trim();
-  if (cleanText.startsWith('```')) {
-    cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
+  const { data, truncated } = parseJsonResponse<Omit<ParsedProposal, 'documentId' | 'documentName'>>(
+    message,
+    `Parsing ${vendorName}`
+  );
 
   const parsed: ParsedProposal = {
-    ...JSON.parse(cleanText),
+    ...data,
     documentId,
     documentName,
   };
+
+  // Normalize the collections the rest of the pipeline iterates over — a
+  // recovered partial payload may be missing the tail-end arrays entirely.
+  parsed.modules = parsed.modules || [];
+  parsed.implementationItems = parsed.implementationItems || [];
+  parsed.serviceItems = parsed.serviceItems || [];
+  parsed.discounts = parsed.discounts || [];
+  parsed.notableTerms = parsed.notableTerms || [];
+  parsed.unknowns = parsed.unknowns || [];
+
+  if (truncated) {
+    parsed.unknowns.push(
+      'The AI extraction for this vendor was cut off, so some line items may be missing. ' +
+        'Review this vendor against the source document before sharing the comparison.'
+    );
+  }
 
   return parsed;
 }
@@ -359,43 +449,47 @@ For Totals:
 
 If any component of a total is "To be confirmed", mark the total as "To be confirmed" too and note which components are missing.`;
 
-  const message = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 16384,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  // The comparison is the largest response in the pipeline — every cell carries
+  // a note and a citation excerpt — so it gets the most headroom. A partially
+  // recovered table is not safe to show (the Totals section is written last and
+  // would go missing), so on truncation we retry once asking for terser prose
+  // rather than accepting whatever came back.
+  const terseRetryPrompt = `${prompt}
 
-  const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
+IMPORTANT: A previous attempt at this response was cut off because it ran too long. Produce the same structure, but keep every "excerpt" and "rawText" value under 150 characters, keep each "note" to one short sentence, and include at most 8 entries in the top-level "citations" array. Brevity applies to the prose fields only — do NOT drop any sections, rows, or vendors.`;
 
-  let cleanText = responseText.trim();
-  // Strip markdown code fences if present
-  if (cleanText.startsWith('```')) {
-    cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
+  const attempts = [prompt, terseRetryPrompt];
 
-  // Extract valid JSON if there's leading/trailing text
-  const firstBrace = cleanText.indexOf('{');
-  if (firstBrace > 0) {
-    cleanText = cleanText.slice(firstBrace);
-  }
+  for (let attempt = 0; attempt < attempts.length; attempt++) {
+    const isLastAttempt = attempt === attempts.length - 1;
+    const message = await createMessage({ maxTokens: 64000, prompt: attempts[attempt] });
 
-  // Find the last closing brace to handle truncation or trailing content
-  const lastBrace = cleanText.lastIndexOf('}');
-  if (lastBrace > 0 && lastBrace < cleanText.length - 1) {
-    cleanText = cleanText.slice(0, lastBrace + 1);
-  }
+    let result: AnalysisResult;
+    try {
+      const parsed = parseJsonResponse<AnalysisResult>(message, 'Building the comparison');
+      if (parsed.truncated) {
+        if (!isLastAttempt) continue;
+        throw new Error(
+          'The comparison was too long for the AI to finish. Shorten the answers on the ' +
+            'review step (upload long documents as supplemental files instead of pasting ' +
+            'their text) and finalize again.'
+        );
+      }
+      result = parsed.data;
+    } catch (error) {
+      if (!isLastAttempt) {
+        console.warn('[claude] Comparison attempt failed, retrying with a terser prompt:', error);
+        continue;
+      }
+      throw error;
+    }
 
-  try {
-    const result: AnalysisResult = JSON.parse(cleanText);
     validateAndFixComparison(result, parsedProposals, targetHeadcount);
     return result;
-  } catch (parseError) {
-    console.error('Failed to parse Claude comparison response. Response length:', responseText.length, 'Stop reason:', message.stop_reason);
-    if (message.stop_reason === 'max_tokens') {
-      throw new Error('The AI response was too long and got cut off. Please try again — the analysis will regenerate.');
-    }
-    throw parseError;
   }
+
+  // Unreachable — the final attempt either returns or throws.
+  throw new Error('Failed to generate the comparison.');
 }
 
 export async function generateClarifyingQuestions(
@@ -437,19 +531,10 @@ Return ONLY valid JSON (no markdown, no explanation) as an array:
   }
 ]`;
 
-  const message = await anthropic.messages.create({
-    model: 'claude-opus-4-8',
-    max_tokens: 4096,
-    messages: [{ role: 'user', content: prompt }],
-  });
+  const message = await createMessage({ maxTokens: 8000, prompt });
 
-  const responseText = message.content[0].type === 'text' ? message.content[0].text : '';
-
-  let cleanText = responseText.trim();
-  if (cleanText.startsWith('```')) {
-    cleanText = cleanText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
-
-  const questions: ClarifyingQuestion[] = JSON.parse(cleanText);
-  return questions;
+  const { data } = parseJsonResponse<ClarifyingQuestion[]>(message, 'Generating clarifying questions');
+  // A truncated list is still usable here: every recovered question is complete,
+  // and unanswered questions fall back to the AI's defaults anyway.
+  return Array.isArray(data) ? data : [];
 }
