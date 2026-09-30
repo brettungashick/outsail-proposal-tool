@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser, requireAnalysisAccess } from '@/lib/access';
 import { prisma } from '@/lib/prisma';
+import { RevisionHistoryEntry, parseJsonOr } from '@/lib/revision';
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getSessionUser();
@@ -31,7 +32,19 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       version: true,
       createdAt: true,
       createdBy: true,
+      revisionHistory: true,
     },
+  });
+
+  // Each version carries its full feedback chain; the list only needs the round
+  // that produced it.
+  const versionSummaries = versions.map(({ revisionHistory, ...v }) => {
+    const history = parseJsonOr<RevisionHistoryEntry[]>(revisionHistory, []);
+    const last = history[history.length - 1];
+    return {
+      ...v,
+      revision: last ? { feedback: last.feedback, basedOnVersion: last.basedOnVersion } : null,
+    };
   });
 
   // Get all edits for the current analysis
@@ -40,5 +53,5 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     orderBy: { editedAt: 'desc' },
   });
 
-  return NextResponse.json({ versions, edits });
+  return NextResponse.json({ versions: versionSummaries, edits });
 }

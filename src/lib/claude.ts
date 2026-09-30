@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ParsedProposal, AnalysisResult, ClarifyingQuestion } from '@/types';
+import { ParsedProposal, AnalysisResult, ClarifyingQuestion, ComparisonTable } from '@/types';
 import { extractJsonPayload, repairTruncatedJson } from '@/lib/json-recovery';
 
 const anthropic = new Anthropic({
@@ -274,39 +274,32 @@ function validateAndFixComparison(
   }
 }
 
-export async function generateComparison(
-  parsedProposals: ParsedProposal[],
-  advisorContext?: string
-): Promise<AnalysisResult> {
-  const vendorNames = parsedProposals.map((p) => p.vendorName);
+function medianHeadcount(parsedProposals: ParsedProposal[]): number | null {
   const headcounts = parsedProposals
     .map((p) => p.headcount)
     .filter((h): h is number => h !== null);
-  const targetHeadcount =
-    headcounts.length > 0
-      ? (() => {
-          headcounts.sort((a, b) => a - b);
-          const mid = Math.floor(headcounts.length / 2);
-          return headcounts.length % 2 === 0
-            ? Math.round((headcounts[mid - 1] + headcounts[mid]) / 2)
-            : headcounts[mid];
-        })()
-      : null;
+  if (headcounts.length === 0) return null;
+  headcounts.sort((a, b) => a - b);
+  const mid = Math.floor(headcounts.length / 2);
+  return headcounts.length % 2 === 0
+    ? Math.round((headcounts[mid - 1] + headcounts[mid]) / 2)
+    : headcounts[mid];
+}
 
-  const prompt = `You are building a standardized comparison of HRIS/HR Tech vendor proposals for a client evaluation. You have ${parsedProposals.length} parsed proposals from these vendors: ${vendorNames.join(', ')}.
-
-CRITICAL RULES:
+/** The standardization rules shared by first-pass generation and feedback revisions. */
+function comparisonRules(targetHeadcount: number | null): string {
+  return `CRITICAL RULES:
 - NEVER hallucinate or fill in gaps that are not found in the parsed data below. If something is missing, set amount to null, display to "To be confirmed", and isConfirmed to false.
 - When a price range was given (isRange: true), you MUST calculate the midpoint: (rangeMin + rangeMax) / 2, then use that as the base rate for annualization. Example: "$5-$8 PEPM" → midpoint $6.50 PEPM → $6.50 × headcount × 12 = annual amount. Note the range and midpoint in standardizationNotes.
 - ${targetHeadcount ? `Normalize all per-employee pricing to ${targetHeadcount} employees. If a vendor quoted a different headcount, scale proportionally and note it.` : 'Headcount was not consistently specified. Note this and use the amounts as-is.'}
 - ALL recurring fee amounts MUST be expressed as ANNUAL totals. If a vendor quotes PEPM (per employee per month), multiply: PEPM × headcount × 12. VERIFY YOUR MATH: for example, $10 PEPM × 500 employees × 12 months = $60,000/year (NOT $5,000, NOT $6,000). If a vendor quotes a monthly flat fee, multiply × 12. The "amount" field for every recurring row must be the annual dollar cost. Implementation fees are one-time and should NOT be annualized. Note any PEPM-to-annual or monthly-to-annual conversions in standardizationNotes, showing the calculation (e.g., "$10 PEPM × 500 × 12 = $60,000").
 - Do NOT combine or add pricing that isn't explicitly found. Each cell should map to specific data from the proposals.
-- Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".
+- Include a "Discounts" section with each vendor's discounts. Mark discount rows with "isDiscount": true. Each discount row should have a unique id starting with "discount_".`;
+}
 
-PARSED PROPOSALS:
-${JSON.stringify(parsedProposals, null, 2)}
-${advisorContext ? `\n${advisorContext}\n\nIMPORTANT: Use the advisor's clarifications above to resolve ambiguities, fill in missing data, and adjust your analysis accordingly. The advisor has domain expertise — prioritize their input over assumptions.\n` : ''}
-BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no markdown, no explanation):
+/** The output schema and section guidance shared by generation and revisions. */
+function comparisonSchema(vendorNames: string[], targetHeadcount: number | null): string {
+  return `BUILD A COMPARISON with the following structure. Return ONLY valid JSON (no markdown, no explanation):
 
 {
   "comparisonTable": {
@@ -448,12 +441,22 @@ For Totals:
 - 3-Year Total = Year 1 + Year 2 + Year 3
 
 If any component of a total is "To be confirmed", mark the total as "To be confirmed" too and note which components are missing.`;
+}
 
-  // The comparison is the largest response in the pipeline — every cell carries
-  // a note and a citation excerpt — so it gets the most headroom. A partially
-  // recovered table is not safe to show (the Totals section is written last and
-  // would go missing), so on truncation we retry once asking for terser prose
-  // rather than accepting whatever came back.
+/**
+ * Request a full comparison, retrying once with a terser prompt on truncation.
+ *
+ * The comparison is the largest response in the pipeline — every cell carries
+ * a note and a citation excerpt — so it gets the most headroom. A partially
+ * recovered table is not safe to show (the Totals section is written last and
+ * would go missing), so on truncation we retry once asking for terser prose
+ * rather than accepting whatever came back.
+ */
+async function requestComparison<T extends AnalysisResult>(
+  prompt: string,
+  label: string,
+  tooLongMessage: string
+): Promise<T> {
   const terseRetryPrompt = `${prompt}
 
 IMPORTANT: A previous attempt at this response was cut off because it ran too long. Produce the same structure, but keep every "excerpt" and "rawText" value under 150 characters, keep each "note" to one short sentence, and include at most 8 entries in the top-level "citations" array. Brevity applies to the prose fields only — do NOT drop any sections, rows, or vendors.`;
@@ -464,32 +467,151 @@ IMPORTANT: A previous attempt at this response was cut off because it ran too lo
     const isLastAttempt = attempt === attempts.length - 1;
     const message = await createMessage({ maxTokens: 64000, prompt: attempts[attempt] });
 
-    let result: AnalysisResult;
     try {
-      const parsed = parseJsonResponse<AnalysisResult>(message, 'Building the comparison');
+      const parsed = parseJsonResponse<T>(message, label);
       if (parsed.truncated) {
         if (!isLastAttempt) continue;
-        throw new Error(
-          'The comparison was too long for the AI to finish. Shorten the answers on the ' +
-            'review step (upload long documents as supplemental files instead of pasting ' +
-            'their text) and finalize again.'
-        );
+        throw new Error(tooLongMessage);
       }
-      result = parsed.data;
+      return parsed.data;
     } catch (error) {
       if (!isLastAttempt) {
-        console.warn('[claude] Comparison attempt failed, retrying with a terser prompt:', error);
+        console.warn(`[claude] ${label} attempt failed, retrying with a terser prompt:`, error);
         continue;
       }
       throw error;
     }
-
-    validateAndFixComparison(result, parsedProposals, targetHeadcount);
-    return result;
   }
 
   // Unreachable — the final attempt either returns or throws.
-  throw new Error('Failed to generate the comparison.');
+  throw new Error(`${label} failed.`);
+}
+
+export async function generateComparison(
+  parsedProposals: ParsedProposal[],
+  advisorContext?: string
+): Promise<AnalysisResult> {
+  const vendorNames = parsedProposals.map((p) => p.vendorName);
+  const targetHeadcount = medianHeadcount(parsedProposals);
+
+  const prompt = `You are building a standardized comparison of HRIS/HR Tech vendor proposals for a client evaluation. You have ${parsedProposals.length} parsed proposals from these vendors: ${vendorNames.join(', ')}.
+
+${comparisonRules(targetHeadcount)}
+
+PARSED PROPOSALS:
+${JSON.stringify(parsedProposals, null, 2)}
+${advisorContext ? `\n${advisorContext}\n\nIMPORTANT: Use the advisor's clarifications above to resolve ambiguities, fill in missing data, and adjust your analysis accordingly. The advisor has domain expertise — prioritize their input over assumptions.\n` : ''}
+${comparisonSchema(vendorNames, targetHeadcount)}`;
+
+  const result = await requestComparison<AnalysisResult>(
+    prompt,
+    'Building the comparison',
+    'The comparison was too long for the AI to finish. Shorten the answers on the ' +
+      'review step (upload long documents as supplemental files instead of pasting ' +
+      'their text) and finalize again.'
+  );
+
+  validateAndFixComparison(result, parsedProposals, targetHeadcount);
+  return result;
+}
+
+export interface RevisionResult extends AnalysisResult {
+  changeSummary: string[];
+}
+
+/** Drop audit trails before sending a table back to the model — they're noise to it. */
+function stripAuditData(table: ComparisonTable): ComparisonTable {
+  const { auditLog: _auditLog, ...rest } = table;
+  void _auditLog;
+  return {
+    ...rest,
+    sections: rest.sections.map((section) => ({
+      ...section,
+      rows: section.rows.map((row) => ({
+        ...row,
+        values: row.values.map((value) => {
+          const { audit: _audit, ...cell } = value;
+          void _audit;
+          return cell;
+        }),
+      })),
+    })),
+  };
+}
+
+/**
+ * Regenerate a completed analysis from free-text advisor feedback.
+ *
+ * The current analysis (including the advisor's manual table edits) is the
+ * baseline: the model is told to copy everything the feedback doesn't touch.
+ * It can still drift, which is why callers diff the result before saving it.
+ */
+export async function reviseComparison(params: {
+  parsedProposals: ParsedProposal[];
+  advisorContext?: string;
+  current: AnalysisResult;
+  feedback: string;
+  priorFeedback?: string[];
+}): Promise<RevisionResult> {
+  const { parsedProposals, advisorContext, current, feedback, priorFeedback = [] } = params;
+  const vendorNames = current.comparisonTable.vendors;
+  const targetHeadcount =
+    current.comparisonTable.normalizedHeadcount || medianHeadcount(parsedProposals);
+
+  const priorRounds = priorFeedback.length
+    ? `\nEARLIER FEEDBACK ROUNDS (already reflected in the current comparison — do not undo them):\n${priorFeedback
+        .map((f, i) => `${i + 1}. ${f}`)
+        .join('\n')}\n`
+    : '';
+
+  const prompt = `You are revising an existing standardized comparison of HRIS/HR Tech vendor proposals for a client evaluation. The vendors are: ${vendorNames.join(', ')}. An advisor reviewed the completed comparison and wrote feedback. Apply the feedback and return the complete revised comparison.
+
+HOW TO REVISE:
+- The CURRENT COMPARISON below is the baseline. It already reflects the advisor's earlier clarifications and any edits they made by hand in the table. Treat it as correct except where the feedback says otherwise.
+- Change only what the feedback asks for, plus anything that must change as a direct consequence (for example, a note or standardization note describing a value you changed). Copy every other row, cell value, note and citation exactly as it appears in the current comparison.
+- Keep existing row "id" values. Give new rows new unique ids. Keep sections and rows in their current order unless the feedback asks to reorder them.
+- Cells with "isManualOverride": true were set by hand. Leave them unchanged unless the feedback explicitly addresses them.
+- If the feedback conflicts with the source proposals, follow the feedback (the advisor may have information from calls or emails) and record the adjustment in standardizationNotes.
+- If part of the feedback is ambiguous or can't be applied, leave that part of the comparison unchanged and say so in changeSummary.
+- Subtotal and Totals rows are recalculated by the system afterwards, but still include them.
+
+${comparisonRules(targetHeadcount)}
+
+PARSED PROPOSALS (source data):
+${JSON.stringify(parsedProposals, null, 2)}
+${advisorContext ? `\n${advisorContext}\n` : ''}${priorRounds}
+CURRENT COMPARISON:
+${JSON.stringify(
+  {
+    comparisonTable: stripAuditData(current.comparisonTable),
+    standardizationNotes: current.standardizationNotes,
+    vendorNotes: current.vendorNotes,
+    nextSteps: current.nextSteps,
+    citations: current.citations,
+  },
+  null,
+  2
+)}
+
+ADVISOR FEEDBACK TO APPLY:
+---
+${feedback}
+---
+
+${comparisonSchema(vendorNames, targetHeadcount)}
+
+In addition to the fields above, include a top-level "changeSummary" array of short plain-language strings, one per change you made (e.g. "Moved Paylocity's carrier feed fee from Service Fees to Implementation Fees"). List anything from the feedback you could not apply, with the reason.`;
+
+  const result = await requestComparison<RevisionResult>(
+    prompt,
+    'Revising the comparison',
+    'The revised comparison was too long for the AI to finish. Try splitting your ' +
+      'feedback into smaller rounds.'
+  );
+
+  result.changeSummary = Array.isArray(result.changeSummary) ? result.changeSummary : [];
+  validateAndFixComparison(result, parsedProposals, targetHeadcount);
+  return result;
 }
 
 export async function generateClarifyingQuestions(
