@@ -11,6 +11,7 @@ import VersionHistory from '@/components/VersionHistory';
 import VendorDetailView from '@/components/VendorDetailView';
 import AuditDrawer from '@/components/AuditDrawer';
 import PromoteToMemory from '@/components/PromoteToMemory';
+import RevisionFeedback from '@/components/RevisionFeedback';
 import { ComparisonTable as ComparisonTableType, Citation, DiscountToggles, HiddenRows, CellStatus, CellAuditEvent, VendorValue } from '@/types';
 import { recalculateTable } from '@/lib/recalculate';
 import { generateId } from '@/lib/utils';
@@ -58,6 +59,7 @@ export default function AnalysisPage() {
   const [activeTab, setActiveTab] = useState<AnalysisTab>('summary');
   const [isOwner, setIsOwner] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [latestAnalysisId, setLatestAnalysisId] = useState<string | null>(null);
   const [discountToggles, setDiscountToggles] = useState<DiscountToggles>({});
   const [hiddenRows, setHiddenRows] = useState<HiddenRows>({});
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -114,6 +116,7 @@ export default function AnalysisPage() {
 
     // If latest analysis is in clarifying state, redirect to project page
     const latestAnalysis = proj.analyses?.[0];
+    setLatestAnalysisId(latestAnalysis?.id ?? null);
     if (latestAnalysis?.status === 'clarifying') {
       router.push(`/projects/${projectId}`);
       return;
@@ -772,6 +775,15 @@ export default function AnalysisPage() {
                 onHeadcountGrowthChange={canEdit ? handleHeadcountGrowthChange : undefined}
               />
             </div>
+
+            {canEdit && analysis.id === latestAnalysisId && (
+              <RevisionFeedback
+                key={analysis.id}
+                analysisId={analysis.id}
+                version={analysis.version}
+                onAccepted={(newId) => fetchAnalysis(newId)}
+              />
+            )}
 
             {/* Notes */}
             <div className="mb-6">

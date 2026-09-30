@@ -19,6 +19,8 @@ export async function GET() {
     `ALTER TABLE "Analysis" ADD COLUMN "clarifyingQuestions" TEXT`,
     `ALTER TABLE "Analysis" ADD COLUMN "advisorAnswers" TEXT`,
     `ALTER TABLE "Analysis" ADD COLUMN "analysisProgress" TEXT`,
+    `ALTER TABLE "Analysis" ADD COLUMN "pendingRevision" TEXT`,
+    `ALTER TABLE "Analysis" ADD COLUMN "revisionHistory" TEXT`,
     // Document columns
     `ALTER TABLE "Document" ADD COLUMN "fileSize" INTEGER`,
     `ALTER TABLE "Document" ADD COLUMN "ingestionStatus" TEXT NOT NULL DEFAULT 'uploaded'`,

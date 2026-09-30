@@ -17,6 +17,7 @@ interface Version {
   version: number;
   createdAt: string;
   createdBy: string;
+  revision: { feedback: string; basedOnVersion: number } | null;
 }
 
 interface VersionHistoryProps {
@@ -86,6 +87,11 @@ export default function VersionHistory({
                       </span>
                       <span className="text-xs text-slate-400">{formatDate(v.createdAt)}</span>
                     </div>
+                    {v.revision && (
+                      <p className="mt-1 text-xs text-slate-500 line-clamp-2">
+                        Revised from v{v.revision.basedOnVersion}: {v.revision.feedback}
+                      </p>
+                    )}
                   </button>
                 ))}
               </div>

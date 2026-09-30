@@ -38,6 +38,14 @@ export const analysisFinalizeSchema = z.object({
   answers: z.record(z.string(), z.string()).optional().default({}),
 });
 
+export const analysisReviseSchema = z.object({
+  feedback: z
+    .string()
+    .trim()
+    .min(1, 'Feedback is required')
+    .max(20000, 'Feedback must be 20,000 characters or fewer'),
+});
+
 // ── Share schemas ──
 
 export const shareCreateSchema = z.object({

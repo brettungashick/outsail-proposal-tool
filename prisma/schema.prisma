@@ -73,6 +73,8 @@ model Analysis {
   clarifyingQuestions  String?        // JSON: AI-generated questions
   advisorAnswers       String?        // JSON: advisor responses to questions
   analysisProgress     String?        // JSON: progress tracking for async processing
+  pendingRevision      String?        // JSON: AI revision from advisor feedback, awaiting accept/discard
+  revisionHistory      String?        // JSON: feedback rounds that produced this version
   createdBy            String
   createdAt            DateTime       @default(now())
   edits                AnalysisEdit[]
